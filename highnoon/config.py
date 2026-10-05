@@ -113,7 +113,7 @@ class DisplayConfig:
     backend: str = "gl"  # "gl" = pyglet/OpenGL (~2.3 ms/frame) or "cv" (~16 ms/frame on macOS)
     vsync: bool = False  # vsync removes tearing but blocks up to one refresh (~16 ms at 60 Hz)
     window_name: str = "HIGH NOON"
-    show_debug: bool = True
+    show_debug: bool = False  # skeleton, face boxes, signal readouts, timings (toggle with "d")
     background: bool = True  # replace the real background using the segmentation mask
 
 

@@ -24,9 +24,9 @@ Latency is the sum of the stages one frame passes through.
 | identity tracking (main)    | 0.1 ms  | 0.1 ms  | Hungarian, 2x2 |
 | One Euro filtering (main)   | <0.1 ms | <0.1 ms | vectorised over 33 keypoints |
 | game logic (main)           | 0.02 ms | 0.02 ms | actions, ray casts, rules |
-| render (main)               | 1.5 ms  | 1.6 ms  | background composite + game layer + HUD |
+| render (main)               | 4.8 ms  | 5.7 ms  | backdrop composite, wall, glow layer, sprites, HUD, vignette |
 | display, pyglet (main)      | 2.4 ms  | 2.5 ms  | |
-| **capture -> on screen**    | **30.7 ms** | **31.3 ms** | 300 frames, 0 dropped |
+| **capture -> on screen**    | **33.4 ms** | **35.6 ms** | 300 frames, 0 dropped |
 | **throughput**              | **30.0 fps** | | camera-bound; 36 fps unpaced on a clip |
 
 Reproduce: `python -m highnoon --max-frames 1800 --metrics-csv results/soak.csv`
@@ -96,7 +96,17 @@ finished hand result. Measured in the app: hand 17.9 ms per run, results 0 frame
 (`hand_lag`), still 30 fps with 0 dropped frames and 29.4 ms latency. `max_hands = 2` (one trigger
 hand per player) keeps the cost bounded.
 
-### 8. Newest-frame-only capture
+### 8. Polished rendering within budget
+The visual pass (Western backdrop, plank wall, TrueType HUD, glow, particles, vignette, shake)
+raised render time from 1.5 to 4.8 ms. It runs on the main thread in parallel with inference, so
+throughput is unchanged (30 fps) and latency rose about 3 ms. The rules that keep it cheap:
+- Backdrop, wall, shadow ramp and vignette are generated once per resolution.
+- Text is rendered once per distinct string with Pillow and cached as sprites (LRU). A HUD blit
+  costs under 0.1 ms; Pillow rendering every frame would cost milliseconds.
+- All glow (lasers, tracers, muzzle flashes) goes into one layer applied with a single `cv2.add`.
+- Alpha blending only touches each sprite's own region, never the full frame.
+
+### 9. Newest-frame-only capture
 The capture thread overwrites a single slot instead of filling a queue. If any stage gets slow,
 frames are dropped (logged as `dropped`) rather than delayed, so latency cannot accumulate.
 

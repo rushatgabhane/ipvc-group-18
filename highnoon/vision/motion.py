@@ -28,6 +28,11 @@ MIN_FOREARM = 0.3  # shorter forearms are pointing at the camera (foreshortened)
 ELEVATION_RANGE = (math.radians(-50), math.radians(80))
 SHOULDERS_PER_TORSO = 0.8  # typical shoulder width / torso length, used when the hips are out of frame
 ARMS_DOWN_DROP = 0.75  # wrists this many torso lengths below the shoulders = gun lowered
+# Extra smoothing on the aim angle (rad). The laser amplifies angular jitter over its whole
+# length, so it needs more smoothing than the keypoints themselves: steady when held still,
+# but beta lets fast swings through with little lag.
+AIM_MIN_CUTOFF = 0.8  # Hz
+AIM_BETA = 0.6  # per rad/s
 
 
 class MotionFilter:
@@ -36,6 +41,7 @@ class MotionFilter:
         self._filters: dict[int, OneEuroFilter] = {}
         self._aim_arm: dict[int, int] = {}
         self._scale: dict[int, float] = {}
+        self._aim: dict[int, tuple[int, OneEuroFilter, float]] = {}  # id -> (arm, filter, last angle)
 
     def _filter(self, player_id: int) -> OneEuroFilter:
         f = self._filters.get(player_id)
@@ -51,6 +57,7 @@ class MotionFilter:
                 f.reset()
                 self._aim_arm.pop(p.id, None)
                 self._scale.pop(p.id, None)
+                self._aim.pop(p.id, None)
             if p.pose is None:
                 p.signals = None
                 continue
@@ -64,6 +71,23 @@ class MotionFilter:
                 if p.face is not None
                 else float(p.smoothed[0][1])
             )
+            self._smooth_aim(p.id, p.signals, t)
+
+    def _smooth_aim(self, player_id: int, sig: MotionSignals, t: float) -> None:
+        """Filter the aim direction's angle. `elevation` stays raw for the flick trigger."""
+        if not sig.aim_valid:
+            self._aim.pop(player_id, None)
+            return
+        arm = self._aim_arm[player_id]
+        angle = math.atan2(float(sig.aim_dir[1]), float(sig.aim_dir[0]))
+        entry = self._aim.get(player_id)
+        if entry is None or entry[0] != arm:  # new aim or switched arm: start fresh, no blending
+            entry = (arm, OneEuroFilter(AIM_MIN_CUTOFF, AIM_BETA, 1.0), angle)
+        _, filt, last = entry
+        angle = last + math.remainder(angle - last, math.tau)  # unwrap across +-pi
+        smoothed = float(filt(np.array([angle], np.float32), t)[0])
+        self._aim[player_id] = (arm, filt, smoothed)
+        sig.aim_dir = np.array([math.cos(smoothed), math.sin(smoothed)], np.float32)
 
     def _signals(self, player_id: int, kp: np.ndarray, reliable: np.ndarray) -> MotionSignals:
         shoulder_mid = (kp[L_SHOULDER] + kp[R_SHOULDER]) / 2

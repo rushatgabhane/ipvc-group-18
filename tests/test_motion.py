@@ -49,3 +49,24 @@ def test_forearm_pointing_at_camera_gives_no_aim():
     kp[16] = kp[14] + (10, -5)  # forearm foreshortened to ~11 px
     kp[15] = kp[13] + (0, 10)
     assert not signals(kp, vis).aim_valid
+
+
+def test_aim_smoothing_reduces_jitter_and_follows_swings():
+    rng = np.random.default_rng(0)
+    mf = MotionFilter(FilterConfig())
+    angles = []
+    for i in range(90):
+        kp, vis = body()
+        kp[16] = kp[14] + (60, -80) + rng.normal(0, 4, 2)  # jittery forearm
+        p = Player(id=1, pose=PoseObservation(kp, vis, np.zeros((33, 3), np.float32)), visible=True)
+        mf.update([p], i / 30, set())
+        angles.append(np.arctan2(p.signals.aim_dir[1], p.signals.aim_dir[0]))
+    raw_jitter = np.degrees(np.std([np.arctan2(-80 + d[1], 60 + d[0]) for d in rng.normal(0, 4, (60, 2))]))
+    assert np.degrees(np.std(angles[30:])) < raw_jitter * 0.5
+
+    for i in range(90, 110):  # swing the forearm to point sideways: the aim must follow
+        kp, vis = body()
+        kp[16] = kp[14] + (60, 0)  # forearm horizontal (arm stays bent, so the forearm ray is used)
+        p = Player(id=1, pose=PoseObservation(kp, vis, np.zeros((33, 3), np.float32)), visible=True)
+        mf.update([p], i / 30, set())
+    assert abs(np.degrees(np.arctan2(p.signals.aim_dir[1], p.signals.aim_dir[0]))) < 5

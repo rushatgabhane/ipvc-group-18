@@ -5,3 +5,4 @@ opencv-contrib-python==5.0.0.93  # mediapipe depends on contrib; do not also ins
 numpy==2.5.3
 scipy==1.18.1
 pyglet==2.1.16  # OpenGL display (~2.3 ms/frame); no bundled SDL, unlike pygame
+pillow==12.3.0  # TrueType text for the HUD (also a mediapipe dependency via matplotlib)

@@ -60,6 +60,7 @@ class Target:
     radius: float
     alive: bool = True
     respawn_t: float = 0.0
+    spawned_t: float = 0.0  # for the pop-in animation
 
 
 @dataclass
@@ -243,9 +244,9 @@ class Game:
             ]
         for target in self.targets:
             if not target.alive and t >= target.respawn_t:
-                self._spawn_target(target, player)
+                self._spawn_target(target, player, t)
 
-    def _spawn_target(self, target: Target, player: Player) -> None:
+    def _spawn_target(self, target: Target, player: Player, t: float) -> None:
         """Place a bottle above the wall, clear of the player's head and of other bottles."""
         radius = 0.04 * self.height
         # Keep clear of the head. Shoulders are a poor guide: when a player sits close to the
@@ -280,3 +281,4 @@ class Game:
         target.center = center
         target.radius = radius
         target.alive = True
+        target.spawned_t = t

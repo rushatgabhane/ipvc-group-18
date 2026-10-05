@@ -1,158 +1,311 @@
 """T5: draws the game layer on top of the composited camera image.
 
-Draw order matters: the wall is drawn after the players, so it occludes their lower body.
-A ducking player really disappears behind cover.
-Everything uses OpenCV primitives on small regions, never full-frame per-pixel numpy ops.
+Layer order, back to front:
+  1. players (already composited onto the backdrop by the renderer)
+  2. the wall, which occludes the lower body, so a ducking player disappears behind it
+  3. bottles, particles
+  4. additive glow layer: laser sights, tracers, muzzle flashes
+  5. reticles, name tags above heads, floating numbers
+  6. HUD cards, banner, announcements
+
+Glow is drawn into one black layer and added with cv2.add (one full-frame op). Text comes from
+the sprite cache in assets.py. Everything else uses OpenCV primitives on small regions.
 """
 
 from __future__ import annotations
+
+import math
 
 import cv2
 import numpy as np
 
 from highnoon.contracts import Player
 from highnoon.game.game import Game
+from highnoon.render import assets
+from highnoon.render.assets import HUD_FONT, TITLE_FONT, TextCache, blit, blit_center, panel, rounded_rect
+from highnoon.render.fx import FX
 
-FONT = cv2.FONT_HERSHEY_DUPLEX
-WHITE, BLACK, RED, YELLOW, GREEN = (255, 255, 255), (0, 0, 0), (40, 40, 235), (60, 220, 255), (90, 220, 90)
-WOOD, WOOD_DARK = (40, 95, 150), (25, 60, 100)
-
-
-def draw_game(image: np.ndarray, game: Game, players: list[Player], t: float, colors: dict) -> None:
-    _draw_crate(image, game.cover)
-    for target in game.targets:
-        if target.alive:
-            _draw_bottle(image, target.center, target.radius)
-    for pid, aim in game.aims.items():
-        _draw_laser(image, aim, colors.get(pid, WHITE))
-    for b in game.bullets:
-        progress = min(1.0, (t - b.t_fire) / max(b.t_arrive - b.t_fire, 1e-6))
-        head = b.origin + b.direction * b.length * progress
-        tail = b.origin + b.direction * b.length * max(0.0, progress - 0.3)
-        cv2.line(image, _pt(tail), _pt(head), YELLOW, 4, cv2.LINE_AA)
-        cv2.line(image, _pt(tail), _pt(head), WHITE, 1, cv2.LINE_AA)
-    for e in game.effects:
-        _draw_effect(image, e, t)
-    for p in players:
-        st = game.states.get(p.id)
-        if p.visible and st is not None and st.frame.ducked and p.smoothed is not None:
-            cx = int(p.smoothed[0][0])
-            _text_center(image, "DUCKED", (cx, int(game.cover.y0) - 18), 0.8, colors.get(p.id, WHITE), 2)
-    _draw_hud(image, game, {p.id for p in players if p.visible}, colors, t)
+WHITE, BLACK = (255, 255, 255), (0, 0, 0)
+GOLD, RED, CREAM = (70, 200, 255), (60, 60, 235), (215, 240, 250)
+TAG_FOLLOW = 0.35  # name tags lerp toward the head each frame (removes jitter)
+HP_DRAIN = 6.0  # displayed HP catches up with real HP at this rate (1/s)
 
 
-def _pt(p: np.ndarray) -> tuple[int, int]:
+def _pt(p) -> tuple[int, int]:
     return int(p[0]), int(p[1])
 
 
-def _text_center(image, text, center, scale, color, thickness=2) -> None:
-    (w, h), _ = cv2.getTextSize(text, FONT, scale, thickness)
-    org = (int(center[0] - w / 2), int(center[1] + h / 2))
-    cv2.putText(image, text, org, FONT, scale, BLACK, thickness + 3, cv2.LINE_AA)
-    cv2.putText(image, text, org, FONT, scale, color, thickness, cv2.LINE_AA)
+def _hp_color(frac: float) -> tuple[int, int, int]:
+    if frac > 0.5:
+        return (90, 210, 110)
+    if frac > 0.25:
+        return (60, 200, 245)
+    return (60, 70, 235)
 
 
-def _draw_crate(image: np.ndarray, c) -> None:
-    h, w = image.shape[:2]
-    x0, y0, x1, y1 = int(max(c.x0, 0)), int(max(c.y0, 0)), int(min(c.x1, w - 1)), int(min(c.y1, h - 1))
-    if x1 <= x0 or y1 <= y0:
-        return
-    cv2.rectangle(image, (x0, y0), (x1, y1), WOOD, -1)
-    plank = max(12, (y1 - y0) // 4)
-    for y in range(y0 + plank, y1, plank):
-        cv2.line(image, (x0, y), (x1, y), WOOD_DARK, 2)
-    post = max(40, (x1 - x0) // 8)  # vertical posts, staggered per plank row like a wooden wall
-    for row, y in enumerate(range(y0, y1, plank)):
-        offset = (row % 2) * post // 2
-        for x in range(x0 + offset, x1, post):
-            cv2.line(image, (x, y), (x, min(y + plank, y1)), WOOD_DARK, 2)
-    cv2.line(image, (x0, y0), (x1, y0), WOOD_DARK, 6)  # top edge = the duck line
+class GameView:
+    def __init__(self, colors: dict[int, tuple[int, int, int]]):
+        self.colors = colors
+        self.text = TextCache()
+        self.fx = FX()
+        self._tags: dict[int, np.ndarray] = {}
+        self._hp_shown: dict[int, float] = {}
+        self._hp_trail: dict[int, float] = {}
+        self._t_last: float | None = None
+        self._mode: str | None = None
+        self._winner: int | None = None
+        self._round = 1
+        self._glow: np.ndarray | None = None
 
+    # ------------------------------------------------------------------ main entry
+    def draw(self, image: np.ndarray, game: Game, players: list[Player], t: float) -> None:
+        h, w = image.shape[:2]
+        s = h / 720.0  # UI scale
+        dt = 0.0 if self._t_last is None else min(t - self._t_last, 0.1)
+        self._t_last = t
+        self._update_announcements(game, t)
+        self.fx.update(t, game.effects, self.colors)
+        visible = [p for p in players if p.visible and game.states.get(p.id) is not None]
 
-def _draw_bottle(image: np.ndarray, center: np.ndarray, r: float) -> None:
-    cx, cy, r = int(center[0]), int(center[1]), int(r)
-    cv2.rectangle(image, (cx - r // 2, cy - r), (cx + r // 2, cy + r), (60, 140, 60), -1)
-    cv2.rectangle(image, (cx - r // 5, cy - 2 * r), (cx + r // 5, cy - r), (60, 140, 60), -1)
-    cv2.rectangle(image, (cx - r // 2, cy - r), (cx + r // 2, cy + r), (30, 80, 30), 2)
-    cv2.circle(image, (cx, cy), r + 6, (255, 255, 255), 1, cv2.LINE_AA)
+        self._draw_bottles(image, game, t, s)
+        self._draw_particles(image)
+        self._draw_glow(image, game, t, s)
+        for pid, aim in game.aims.items():
+            self._draw_reticle(image, aim, pid, t, s)
+        for p in visible:
+            self._draw_name_tag(image, game, p, dt, s)
+        self._draw_float_texts(image, t, s)
+        self._draw_cards(image, game, visible, dt, t, s)
+        self._draw_banner(image, game, t, s)
+        if game.winner is not None:
+            self._draw_winner(image, game, t, s)
+        self._draw_announcements(image, t, s)
 
+    def shake(self, t: float) -> tuple[int, int]:
+        return self.fx.shake_offset(t)
 
-def _draw_laser(image: np.ndarray, aim, color) -> None:
-    cv2.line(image, _pt(aim.origin), _pt(aim.end), color, 2, cv2.LINE_AA)
-    end = _pt(aim.end)
-    if aim.on_target:
-        cv2.circle(image, end, 7, RED, -1, cv2.LINE_AA)
-        cv2.circle(image, end, 18, RED, 2, cv2.LINE_AA)
-    else:
-        cv2.circle(image, end, 5, color, -1, cv2.LINE_AA)
+    # ------------------------------------------------------------------ world elements
+    def _draw_bottles(self, image, game: Game, t: float, s: float) -> None:
+        for i, target in enumerate(game.targets):
+            if not target.alive:
+                continue
+            age = t - target.spawned_t
+            pop = min(1.0, 0.4 + age / 0.18) if age < 0.18 else 1.0 + 0.08 * math.exp(-(age - 0.18) * 12)
+            sprite = assets.scaled(assets.bottle_sprite(int(target.radius * 2.6)), pop)
+            bob = math.sin(t * 2.2 + i * 1.7) * 3 * s
+            # Soft glow behind the bottle so it reads against the sky.
+            blit_center(image, assets.glow_sprite(int(target.radius * 3.2), (200, 240, 255)),
+                        target.center[0], target.center[1] + bob, alpha=0.35)  # fmt: skip
+            blit_center(image, sprite, target.center[0], target.center[1] + bob)
 
+    def _draw_particles(self, image) -> None:
+        p = self.fx.particles
+        if not len(p.life):
+            return
+        fade = p.fade()
+        for (x, y), col, size, f in zip(p.pos, p.color, p.size, fade, strict=True):
+            r = max(1, int(size * (0.4 + 0.6 * f)))
+            cv2.circle(image, (int(x), int(y)), r, tuple(int(c) for c in col), -1, cv2.LINE_AA)
 
-def _draw_effect(image: np.ndarray, e, t: float) -> None:
-    age = t - e.t
-    pos = _pt(e.pos)
-    if e.kind == "muzzle":
-        if age < 0.12:
-            cv2.circle(image, pos, int(22 * (1 - age / 0.12)) + 4, YELLOW, -1, cv2.LINE_AA)
-        return
-    grow = int(10 + 60 * age)
-    if e.kind in ("hit", "headshot"):
-        cv2.circle(image, pos, grow, RED, 3, cv2.LINE_AA)
-        cv2.circle(image, pos, max(4, 14 - int(20 * age)), RED, -1, cv2.LINE_AA)
-        label = "HEADSHOT!" if e.kind == "headshot" else "HIT"
-        _text_center(
-            image, label, (pos[0], pos[1] - 40 - int(40 * age)), 1.0 if e.kind == "headshot" else 0.8, RED
-        )
-    elif e.kind == "blocked":
-        for k in range(6):
-            ang = k * np.pi / 3 + age * 3
-            tip = (int(pos[0] + grow * np.cos(ang)), int(pos[1] + grow * np.sin(ang)))
-            cv2.line(image, pos, tip, YELLOW, 2, cv2.LINE_AA)
-        _text_center(image, "BLOCKED", (pos[0], pos[1] - 30 - int(30 * age)), 0.7, YELLOW)
-    elif e.kind == "shatter":
-        for k in range(8):
-            ang = k * np.pi / 4
-            p = (int(pos[0] + grow * np.cos(ang)), int(pos[1] + grow * np.sin(ang) + 80 * age * age))
-            cv2.circle(image, p, 4, GREEN, -1, cv2.LINE_AA)
-        _text_center(image, "+1", (pos[0], pos[1] - 30 - int(30 * age)), 0.9, GREEN)
+    def _draw_glow(self, image, game: Game, t: float, s: float) -> None:
+        muzzles = [e for e in game.effects if e.kind == "muzzle" and t - e.t < 0.09]
+        if not (game.aims or game.bullets or muzzles):
+            return
+        if self._glow is None or self._glow.shape != image.shape:
+            self._glow = np.zeros_like(image)
+        glow = self._glow
+        glow[:] = 0
+        for pid, aim in game.aims.items():
+            col = np.array(RED if aim.on_target else self.colors.get(pid, WHITE), np.float32)
+            pulse = 0.85 + 0.15 * math.sin(t * 9)
+            outer = tuple((col * 0.30 * pulse).tolist())
+            cv2.line(glow, _pt(aim.origin), _pt(aim.end), outer, max(2, int(7 * s)), cv2.LINE_AA)
+            cv2.line(glow, _pt(aim.origin), _pt(aim.end), tuple((col * 0.85).tolist()), max(1, int(2 * s)),
+                     cv2.LINE_AA)  # fmt: skip
+        for b in game.bullets:
+            progress = min(1.0, (t - b.t_fire) / max(b.t_arrive - b.t_fire, 1e-6))
+            head = b.origin + b.direction * b.length * progress
+            tail = b.origin + b.direction * b.length * max(0.0, progress - 0.35)
+            cv2.line(glow, _pt(tail), _pt(head), (30, 110, 160), max(3, int(12 * s)), cv2.LINE_AA)
+            cv2.line(glow, _pt(tail), _pt(head), (90, 210, 255), max(2, int(4 * s)), cv2.LINE_AA)
+            cv2.line(glow, _pt(tail), _pt(head), (255, 255, 255), 1, cv2.LINE_AA)
+        for e in muzzles:
+            k = 1 - (t - e.t) / 0.09
+            for r, inten in ((46, 0.25), (30, 0.5), (16, 1.0)):
+                color = (int(120 * inten * k), int(220 * inten * k), int(255 * inten * k))
+                cv2.circle(glow, _pt(e.pos), int(r * s * (0.6 + 0.4 * k)), color, -1, cv2.LINE_AA)
+        cv2.add(image, glow, dst=image)
 
+    def _draw_reticle(self, image, aim, pid: int, t: float, s: float) -> None:
+        color = RED if aim.on_target else self.colors.get(pid, WHITE)
+        c = _pt(aim.end)
+        r = int((20 if aim.on_target else 14) * s * (1 + (0.08 * math.sin(t * 12) if aim.on_target else 0)))
+        cv2.circle(image, c, r + 2, BLACK, 3, cv2.LINE_AA)
+        cv2.circle(image, c, r, color, 2, cv2.LINE_AA)
+        spin = t * (3.0 if aim.on_target else 1.0)
+        for k in range(4):
+            a = spin + k * math.pi / 2
+            p0 = (int(c[0] + math.cos(a) * r * 0.55), int(c[1] + math.sin(a) * r * 0.55))
+            p1 = (int(c[0] + math.cos(a) * r * 1.45), int(c[1] + math.sin(a) * r * 1.45))
+            cv2.line(image, p0, p1, color, 2, cv2.LINE_AA)
+        cv2.circle(image, c, 2, color, -1, cv2.LINE_AA)
 
-def _draw_hud(image: np.ndarray, game: Game, visible: set[int], colors: dict, t: float) -> None:
-    h, w = image.shape[:2]
-    cfg = game.cfg
-    for pid, st in sorted(game.states.items()):
-        if pid not in visible:
-            continue
-        color = colors.get(pid, WHITE)
-        left = pid == 1
-        x = 20 if left else w - 300
-        y = h - 70
-        cv2.rectangle(image, (x - 8, y - 32), (x + 288, y + 52), BLACK, -1)
-        flash = t - st.last_hit_t < 0.25
-        cv2.rectangle(image, (x - 8, y - 32), (x + 288, y + 52), RED if flash else color, 2)
-        score = game.scores.get(pid, 0)
-        cv2.putText(image, f"P{pid}   score {score}", (x, y - 8), FONT, 0.7, color, 2, cv2.LINE_AA)
-        frac = st.hp / cfg.max_hp
-        cv2.rectangle(image, (x, y + 2), (x + 280, y + 20), (60, 60, 60), -1)
-        bar = GREEN if frac > 0.5 else YELLOW if frac > 0.25 else RED
-        cv2.rectangle(image, (x, y + 2), (x + int(280 * frac), y + 20), bar, -1)
-        for i in range(cfg.max_ammo):
-            cx = x + 10 + i * 22
-            fill = YELLOW if i < st.ammo else (70, 70, 70)
-            cv2.rectangle(image, (cx - 4, y + 28), (cx + 4, y + 46), fill, -1)
-        if st.ammo == 0:
-            cv2.putText(image, "lower arms to reload", (x + 140, y + 44), FONT, 0.5, YELLOW, 1, cv2.LINE_AA)
+    def _draw_name_tag(self, image, game: Game, p: Player, dt: float, s: float) -> None:
+        """Name tag + mini HP bar floating above the head (T1's extra visual)."""
+        st = game.states[p.id]
+        color = self.colors.get(p.id, WHITE)
+        if p.face is not None:
+            x0, y0, x1, _ = p.face.bbox
+            target = np.array([(x0 + x1) / 2, y0 - 26 * s], np.float32)
+        elif p.smoothed is not None:
+            torso = p.signals.torso_len if p.signals else 150.0
+            target = np.array([p.smoothed[0][0], p.smoothed[0][1] - 0.6 * torso], np.float32)
+        else:
+            return
+        prev = self._tags.get(p.id)
+        pos = target if prev is None else prev + TAG_FOLLOW * (target - prev)
+        self._tags[p.id] = pos
+        h, w = image.shape[:2]
+        cx = float(np.clip(pos[0], 60 * s, w - 60 * s))
+        cy = float(np.clip(pos[1], 40 * s, h - 40 * s))
 
-    trigger = "close your hand" if cfg.trigger == "fist" else "flick it up"
-    banner = {
-        "idle": "Step into view",
-        "practice": f"PRACTICE - point your arm, {trigger} to shoot the bottles",
-        "duel": "DUEL - duck below the wall to dodge",
-    }[game.mode]
-    _text_center(image, banner, (w // 2, 30), 0.75, WHITE, 2)
-    if game.winner is not None:
-        _text_center(
-            image, f"PLAYER {game.winner} WINS!", (w // 2, h // 2), 2.2, colors.get(game.winner, WHITE), 5
-        )
+        label = self.text.get(f"P{p.id}", int(30 * s), WHITE, HUD_FONT)
+        lw, lh = label.shape[1] + int(22 * s), label.shape[0] + int(4 * s)
+        x0, y0 = int(cx - lw / 2), int(cy - lh - 6 * s)
+        rounded_rect(image, x0 - 2, y0 - 2, x0 + lw + 2, y0 + lh + 2, int(lh / 2) + 2, BLACK)
+        rounded_rect(image, x0, y0, x0 + lw, y0 + lh, int(lh / 2), color)
+        blit_center(image, label, cx, y0 + lh / 2)
+        # Mini HP bar under the tag.
+        bw, bh = int(84 * s), max(5, int(8 * s))
+        bx, by = int(cx - bw / 2), int(cy + 2 * s)
+        rounded_rect(image, bx - 2, by - 2, bx + bw + 2, by + bh + 2, bh, BLACK)
+        frac = self._hp_shown.get(p.id, st.hp) / game.cfg.max_hp
+        if frac > 0.01:
+            rounded_rect(image, bx, by, bx + max(bh, int(bw * frac)), by + bh, bh // 2, _hp_color(frac))
+        if st.frame.ducked:
+            badge = self.text.get("DUCKED", int(22 * s), CREAM, HUD_FONT, stroke=2)
+            blit_center(image, badge, cx, by + bh + 16 * s)
+
+    def _draw_float_texts(self, image, t: float, s: float) -> None:
+        for ft in self.fx.texts:
+            age = (t - ft.t0) / ft.duration
+            pop = 1.0 + 0.4 * max(0.0, 1 - age * 6)
+            sprite = self.text.get(ft.text, int(ft.size * s), ft.color, HUD_FONT, stroke=max(2, int(3 * s)))
+            alpha = 1.0 if age < 0.6 else max(0.0, 1 - (age - 0.6) / 0.4)
+            blit_center(
+                image, assets.scaled(sprite, pop), ft.pos[0], ft.pos[1] - 70 * s * age - 30 * s, alpha
+            )
+
+    # ------------------------------------------------------------------ HUD
+    def _draw_cards(self, image, game: Game, visible: list[Player], dt: float, t: float, s: float) -> None:
+        h, w = image.shape[:2]
+        cfg = game.cfg
+        cw, ch, m = int(310 * s), int(96 * s), int(16 * s)
+        for p in visible:
+            st = game.states[p.id]
+            color = self.colors.get(p.id, WHITE)
+            # Animated HP: the bar eases down, and a light "damage trail" follows more slowly.
+            shown = self._hp_shown.get(p.id, float(st.hp))
+            shown += (st.hp - shown) * min(1.0, HP_DRAIN * dt) if st.hp < shown else st.hp - shown
+            trail = self._hp_trail.get(p.id, shown)
+            trail = max(shown, trail - 40 * dt) if trail > shown else shown
+            self._hp_shown[p.id], self._hp_trail[p.id] = shown, trail
+
+            x0 = m if p.id == 1 else w - m - cw
+            y0 = h - m - ch
+            hit_flash = t - st.last_hit_t < 0.25
+            panel(image, x0, y0, x0 + cw, y0 + ch, r=int(14 * s), opacity=0.68)
+            rounded_rect(image, x0, y0, x0 + cw, y0 + ch, int(14 * s), RED if hit_flash else color, 2)
+            cv2.rectangle(
+                image, (x0 + int(10 * s), y0 + int(12 * s)), (x0 + int(15 * s), y0 + int(40 * s)), color, -1
+            )
+
+            name = self.text.get(f"PLAYER {p.id}", int(30 * s), color, HUD_FONT)
+            blit(image, name, x0 + int(22 * s), y0 + int(6 * s))
+            label = "BOTTLES" if game.mode == "practice" else "WINS"
+            score = self.text.get(f"{game.scores.get(p.id, 0)} {label}", int(24 * s), CREAM, HUD_FONT)
+            blit(image, score, x0 + cw - score.shape[1] - int(12 * s), y0 + int(10 * s))
+
+            bx0, by0 = x0 + int(12 * s), y0 + int(44 * s)
+            bx1, by1 = x0 + cw - int(12 * s), y0 + int(60 * s)
+            rounded_rect(image, bx0, by0, bx1, by1, int(8 * s), (45, 40, 38))
+            span = bx1 - bx0
+            r = int(8 * s)
+            trail_x = bx0 + int(span * trail / cfg.max_hp)
+            shown_x = bx0 + int(span * shown / cfg.max_hp)
+            if trail_x > bx0 + 2 * r:
+                rounded_rect(image, bx0, by0, trail_x, by1, r, (200, 220, 235))
+            if shown_x > bx0 + 2 * r:
+                frac = shown / cfg.max_hp
+                rounded_rect(image, bx0, by0, shown_x, by1, r, _hp_color(frac))
+                cv2.line(image, (bx0 + r, by0 + 3), (shown_x - r, by0 + 3), (255, 255, 255), 1, cv2.LINE_AA)
+            hp_text = self.text.get(f"{int(round(shown))}", int(18 * s), WHITE, HUD_FONT, stroke=2)
+            blit(
+                image, hp_text, bx1 - hp_text.shape[1] - int(4 * s), by0 + (by1 - by0 - hp_text.shape[0]) // 2
+            )
+
+            icon_h = int(22 * s)
+            for i in range(cfg.max_ammo):
+                icon = assets.bullet_icon(icon_h, i < st.ammo)
+                blit(image, icon, x0 + int(14 * s) + i * int(icon.shape[1] + 5 * s), y0 + int(66 * s))
+            if st.ammo == 0 and int(t * 3) % 2 == 0:
+                hint = self.text.get("RELOAD: LOWER BOTH ARMS", int(20 * s), GOLD, HUD_FONT)
+                blit(image, hint, x0 + cw - hint.shape[1] - int(12 * s), y0 + int(68 * s))
+
+    def _draw_banner(self, image, game: Game, t: float, s: float) -> None:
+        w = image.shape[1]
+        trigger = "CLOSE YOUR HAND TO SHOOT" if game.cfg.trigger == "fist" else "FLICK UP TO SHOOT"
+        title, hint = {
+            "idle": ("HIGH NOON", "STEP INTO VIEW"),
+            "practice": ("PRACTICE", f"POINT YOUR ARM  |  {trigger}  |  DUCK BEHIND THE WALL"),
+            "duel": ("DUEL", f"{trigger}  |  DUCK BEHIND THE WALL  |  FIRST TO ZERO LOSES"),
+        }[game.mode]
+        title_s = self.text.get(title, int(30 * s), GOLD, TITLE_FONT, stroke=2, stroke_color=(20, 30, 50))
+        hint_s = self.text.get(hint, int(19 * s), CREAM, HUD_FONT)
+        pw = max(title_s.shape[1], hint_s.shape[1]) + int(40 * s)
+        ph = title_s.shape[0] + hint_s.shape[0] + int(10 * s)
+        x0, y0 = w // 2 - pw // 2, int(10 * s)
+        panel(image, x0, y0, x0 + pw, y0 + ph, r=int(16 * s), opacity=0.55)
+        blit_center(image, title_s, w / 2, y0 + int(4 * s) + title_s.shape[0] / 2)
+        blit_center(image, hint_s, w / 2, y0 + int(4 * s) + title_s.shape[0] + hint_s.shape[0] / 2)
+
+    def _draw_winner(self, image, game: Game, t: float, s: float) -> None:
+        h, w = image.shape[:2]
+        cv2.convertScaleAbs(image, dst=image, alpha=0.45)  # dim the scene behind the result
+        color = self.colors.get(game.winner, WHITE)
+        age = t - (game.round_over_t or t)
+        pop = 1.0 + 0.25 * math.exp(-age * 6)
+        big = self.text.get(f"PLAYER {game.winner}", int(110 * s), color, TITLE_FONT, stroke=4, shadow=6)
+        blit_center(image, assets.scaled(big, pop), w / 2, h * 0.42)
+        sub = self.text.get("WINS THE ROUND", int(48 * s), CREAM, HUD_FONT, stroke=2)
+        blit_center(image, sub, w / 2, h * 0.42 + big.shape[0] * 0.75)
+        left = max(0, math.ceil(game.cfg.round_end_s - age))
+        nxt = self.text.get(f"NEXT ROUND IN {left}", int(28 * s), GOLD, HUD_FONT)
+        blit_center(image, nxt, w / 2, h * 0.42 + big.shape[0] * 0.75 + sub.shape[0] * 1.2)
+
+    # ------------------------------------------------------------------ announcements
+    def _update_announcements(self, game: Game, t: float) -> None:
+        if game.mode != self._mode:
+            if game.mode == "duel":
+                self.fx.announce("DRAW!", t, GOLD)
+            elif game.mode == "practice" and self._mode == "duel":
+                self.fx.announce("PRACTICE", t, CREAM, size=72)
+            self._mode = game.mode
+        if self._winner is not None and game.winner is None:
+            self._round += 1
+            self.fx.announce(f"ROUND {self._round}", t, GOLD)
+        self._winner = game.winner
+
+    def _draw_announcements(self, image, t: float, s: float) -> None:
+        h, w = image.shape[:2]
+        for a in self.fx.announcements:
+            age = (t - a.t0) / a.duration
+            pop = 1.0 + 0.6 * max(0.0, 1 - age * 5)
+            alpha = 1.0 if age < 0.7 else max(0.0, 1 - (age - 0.7) / 0.3)
+            sprite = self.text.get(
+                a.text, int(a.size * s), a.color, TITLE_FONT, stroke=4, stroke_color=(20, 25, 40), shadow=5
+            )
+            blit_center(image, assets.scaled(sprite, pop), w / 2, h * 0.36, alpha)
 
 
 def draw_signal_debug(image: np.ndarray, game: Game, players: list[Player], colors: dict) -> None:

@@ -78,8 +78,8 @@ bash
 .venv/bin/python -m highnoon --delegate cpu  # force CPU inference (default: auto)
 ```
 
-Keys: `q`/`esc` quit, `r` restart round, `d` toggle debug overlay, `b` toggle background,
-`f` fullscreen.
+Keys: `q`/`esc` quit, `r` restart round, `d` debug overlay (skeleton, signal values, timings;
+off by default), `b` toggle background, `f` fullscreen.
 
 ## How to play
 
@@ -169,7 +169,9 @@ highnoon/
     identity.py        persistent player ids, face-to-player assignment (T3)
   render/
     renderer.py        background compositing, overlays, debug panel (T5)
-    game_view.py       crates, laser sights, tracers, hit effects, HUD (T4/T5)
+    game_view.py       laser sights, tracers, bottles, name tags, HUD cards, announcements (T4/T5)
+    assets.py          procedural backdrop/wall/sprites, cached TrueType text
+    fx.py              particles, floating numbers, screen shake
     display.py         pyglet (OpenGL) / OpenCV window output
   game/
     actions.py         fire / duck / reload state machines (T4)
@@ -181,6 +183,7 @@ tools/
   record.py            record raw webcam clips for repeatable tests
   bench_models.py      model / threading benchmark
 tests/                 pytest unit tests
+assets/fonts/          Rye and Bebas Neue (SIL Open Font License, licence files included)
 docs/PERFORMANCE.md    measurements and design decisions
 ```
 
