@@ -71,7 +71,7 @@ python3.12 -m venv .venv
 
 ### mac/linux
 
-bash
+```bash
 .venv/bin/python -m highnoon                 # webcam 0, 1280x720
 .venv/bin/python -m highnoon --source 1      # another camera
 .venv/bin/python -m highnoon --help          # all options
