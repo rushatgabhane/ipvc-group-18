@@ -3,17 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
-# OpenCV's wheel bundles its own SDL2 (via FFmpeg). Loading pygame first makes the process
-# register pygame's SDL Objective-C classes, so Cocoa lookups resolve to the copy we use.
-# macOS still prints "Class SDL... is implemented in both" warnings; they are expected.
-os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
-import pygame  # noqa: E402, F401, I001
-
-from highnoon.app import run  # noqa: E402
-from highnoon.config import Config  # noqa: E402
+from highnoon.app import run
+from highnoon.config import Config
 
 
 def parse_args() -> Config:
@@ -29,7 +22,7 @@ def parse_args() -> Config:
     ap.add_argument("--no-seg", action="store_true", help="disable segmentation mask / background")
     ap.add_argument("--sequential", action="store_true", help="run pose and face sequentially")
     ap.add_argument("--headless", action="store_true", help="no window (benchmarks)")
-    ap.add_argument("--display", choices=["pygame", "cv"], default="pygame", help="window backend")
+    ap.add_argument("--display", choices=["gl", "cv"], default="gl", help="window backend")
     ap.add_argument("--vsync", action="store_true", help="sync to display refresh (adds latency)")
     ap.add_argument("--metrics-csv", type=Path, help="write per-frame timings to this CSV")
     ap.add_argument("--max-frames", type=int, help="stop after N frames")

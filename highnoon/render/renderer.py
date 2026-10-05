@@ -13,6 +13,8 @@ import numpy as np
 from highnoon.config import DisplayConfig
 from highnoon.contracts import Perception, Player
 from highnoon.core.profiler import Profiler
+from highnoon.game.game import Game
+from highnoon.render.game_view import draw_game
 
 PLAYER_COLORS = {1: (60, 60, 230), 2: (230, 160, 40)}  # BGR: red, blue
 
@@ -29,7 +31,9 @@ class Renderer:
         self.cfg = cfg
         self._background: np.ndarray | None = None
 
-    def render(self, perception: Perception, players: list[Player], profiler: Profiler) -> np.ndarray:
+    def render(
+        self, perception: Perception, players: list[Player], game: Game, profiler: Profiler
+    ) -> np.ndarray:
         image = perception.frame.image
         if self.cfg.background and perception.mask is not None:
             image = self._composite(image, perception.mask)
@@ -38,6 +42,7 @@ class Renderer:
         for p in players:
             if p.visible:
                 self._draw_player(image, p)
+        draw_game(image, game, players, perception.frame.t_capture, PLAYER_COLORS)
         if self.cfg.show_debug:
             self._draw_hud(image, profiler, len(perception.poses), len(perception.faces))
         return image
@@ -80,8 +85,11 @@ class Renderer:
             if name in stats:
                 mean, p95 = stats[name]
                 lines.append(f"{name:<10s}{mean:5.1f} ms  p95 {p95:5.1f}")
-        x, y, line_h = 10, 10, 22
-        panel = image[y : y + line_h * len(lines) + 10, x : x + 330]
+        line_h = 22
+        panel_h = line_h * len(lines) + 10
+        # Bottom centre: the only area not used by the banner, play area or player HUDs.
+        x, y = image.shape[1] // 2 - 165, image.shape[0] - panel_h - 10
+        panel = image[y : y + panel_h, x : x + 330]
         cv2.addWeighted(panel, 0.4, np.zeros_like(panel), 0.6, 0, dst=panel)  # dim the panel in place
         for i, text in enumerate(lines):
             cv2.putText(image, text, (x + 8, y + 22 + i * line_h), cv2.FONT_HERSHEY_SIMPLEX, 0.55,

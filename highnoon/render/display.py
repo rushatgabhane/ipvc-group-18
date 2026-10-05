@@ -1,15 +1,19 @@
 """Window output.
 
-pygame (SDL) is the default. Measured on macOS at 720p:
-  OpenCV imshow + waitKey(1)   ~16.3 ms per frame (waitKey alone ~15 ms: Cocoa event pump)
-  pygame blit + flip, no vsync  ~2.9 ms per frame
-That is ~13 ms less capture-to-screen latency, and pygame also gives us sound and fullscreen
-for the game. OpenCV is kept as a dependency-light fallback (--display cv).
+pyglet (OpenGL) is the default. Measured on macOS at 720p, per frame:
+  OpenCV imshow + waitKey(1)       ~16.3 ms (waitKey alone ~15 ms: Cocoa event pump)
+  pygame blit + flip, no vsync      ~2.9 ms
+  pyglet texture upload + flip      ~2.3 ms
+Upload is ~1.4 ms of that whatever the pixel format (BGR, BGRA, pyglet's ImageData or raw
+glTexSubImage2D all measured within 0.1 ms): it is the cost of moving 2.7 MB to the GPU.
+pyglet is also free of SDL. pygame ships its own SDL2, which clashes with the copy bundled
+in every OpenCV wheel ("Class SDL... is implemented in both"). OpenCV is kept as a
+dependency-light fallback (--display cv).
 """
 
 from __future__ import annotations
 
-import os
+import ctypes
 
 import cv2
 import numpy as np
@@ -28,45 +32,62 @@ class Display:
 def open_display(kind: str, title: str, size: tuple[int, int], vsync: bool = False) -> Display:
     if kind == "cv":
         return CvDisplay(title)
-    return PygameDisplay(title, size, vsync)
+    return GlDisplay(title, size, vsync)
 
 
-class PygameDisplay(Display):
+class GlDisplay(Display):
     def __init__(self, title: str, size: tuple[int, int], vsync: bool):
-        os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
-        import pygame
+        import pyglet
+        from pyglet import gl
 
-        self.pg = pygame
-        pygame.display.init()
-        pygame.display.set_caption(title)
+        pyglet.options["debug_gl"] = False  # skips a glGetError after every GL call
+        self.pyglet = pyglet
+        self.gl = gl
         self.size = size
-        # SCALED lets SDL scale on the GPU when the window is resized or fullscreen.
-        self.screen = pygame.display.set_mode(size, pygame.SCALED | pygame.RESIZABLE, vsync=int(vsync))
+        self.window = pyglet.window.Window(*size, caption=title, vsync=vsync, resizable=True)
+        self.texture = pyglet.image.Texture.create(*size)
+        self._keys: list[str] = []
+        self._closed = False
+
+        @self.window.event
+        def on_key_press(symbol, _modifiers):
+            name = pyglet.window.key.symbol_string(symbol).lower()
+            self._keys.append("esc" if name == "escape" else name)
+
+        @self.window.event
+        def on_close():
+            self._closed = True
+            return pyglet.event.EVENT_HANDLED  # we close it ourselves in close()
 
     def show(self, image: np.ndarray) -> list[str]:
-        pg = self.pg
-        h, w = image.shape[:2]
-        if (w, h) != self.size:
+        w, h = self.size
+        if image.shape[1] != w or image.shape[0] != h:
             image = cv2.resize(image, self.size, interpolation=cv2.INTER_LINEAR)
-            h, w = image.shape[:2]
-        # frombuffer wraps the numpy memory without copying; 'BGR' avoids a colour conversion.
-        surface = pg.image.frombuffer(np.ascontiguousarray(image).data, (w, h), "BGR")
-        self.screen.blit(surface, (0, 0))
-        pg.display.flip()
+        self.window.dispatch_events()
+        # OpenGL's origin is bottom-left. Flipping with OpenCV (0.1 ms) is faster than letting
+        # pyglet reorder rows for a negative pitch (+0.3 ms).
+        flipped = cv2.flip(image, 0)
+        gl = self.gl
+        gl.glBindTexture(self.texture.target, self.texture.id)
+        gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
+        gl.glTexSubImage2D(
+            self.texture.target, 0, 0, 0, w, h, gl.GL_BGR, gl.GL_UNSIGNED_BYTE,
+            flipped.ctypes.data_as(ctypes.c_void_p),
+        )  # fmt: skip
+        self.window.clear()
+        self.texture.blit(0, 0, width=self.window.width, height=self.window.height)
+        self.window.flip()
 
-        keys = []
-        for event in pg.event.get():
-            if event.type == pg.QUIT:
-                keys.append("q")
-            elif event.type == pg.KEYDOWN:
-                keys.append("esc" if event.key == pg.K_ESCAPE else pg.key.name(event.key))
+        keys, self._keys = self._keys, []
+        if self._closed:
+            keys.append("q")
         return keys
 
     def toggle_fullscreen(self) -> None:
-        self.pg.display.toggle_fullscreen()
+        self.window.set_fullscreen(not self.window.fullscreen)
 
     def close(self) -> None:
-        self.pg.display.quit()
+        self.window.close()
 
 
 class CvDisplay(Display):

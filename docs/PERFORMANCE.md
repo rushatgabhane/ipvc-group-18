@@ -23,9 +23,10 @@ Latency is the sum of the stages one frame passes through.
 | postprocess (perception)    | 0.4 ms  | 0.4 ms  | landmarks -> numpy, mask copy |
 | identity tracking (main)    | 0.1 ms  | 0.1 ms  | Hungarian, 2x2 |
 | One Euro filtering (main)   | <0.1 ms | <0.1 ms | vectorised over 33 keypoints |
-| render (main)               | 1.3 ms  | 1.3 ms  | background composite + overlay |
-| display, pygame (main)      | 1.4 ms  | 1.6 ms  | |
-| **capture -> on screen**    | **30.0 ms** | **30.4 ms** | 60 s soak, 1800 frames, 0 dropped |
+| game logic (main)           | 0.02 ms | 0.02 ms | actions, ray casts, rules |
+| render (main)               | 1.5 ms  | 1.6 ms  | background composite + game layer + HUD |
+| display, pyglet (main)      | 2.4 ms  | 2.5 ms  | |
+| **capture -> on screen**    | **30.7 ms** | **31.3 ms** | 300 frames, 0 dropped |
 | **throughput**              | **30.0 fps** | | camera-bound; 36 fps unpaced on a clip |
 
 Reproduce: `python -m highnoon --max-frames 1800 --metrics-csv results/soak.csv`
@@ -65,15 +66,20 @@ segmentation model is needed for background replacement.
 | uint8 cv2.multiply/add | 2.2 ms |
 | **cv2.blendLinear** | **0.35 ms** |
 
-### 6. pygame for display instead of cv2.imshow
+### 6. pyglet (OpenGL) for display instead of cv2.imshow
 | Backend | Per frame |
 |---|---|
 | cv2.imshow + waitKey(1) | 16.3 ms (waitKey alone ~15 ms, Cocoa event pump; same in every window mode, and with pollKey) |
 | pygame blit+flip, vsync on | 16.5 ms |
-| **pygame blit+flip, vsync off** | **2.9 ms** (1.4 ms in-app) |
+| pygame blit+flip, vsync off | 2.9 ms |
+| **pyglet texture upload + flip, vsync off** | **2.2 ms** |
 
-Measured in the app: latency went from **44.5 ms to 29.7 ms**. The trade-off is possible
-tearing (`--vsync` brings it back at the cost of up to one refresh).
+Measured in the app: latency went from **44.5 ms (imshow) to ~30 ms**. pygame was used first,
+but it ships its own SDL2, which clashes with the SDL2 bundled in every OpenCV wheel (macOS
+warns "Class SDL... is implemented in both"). pyglet has no SDL and is slightly faster.
+Texture upload is ~1.4 ms in every variant tried (pyglet ImageData, raw glTexSubImage2D,
+BGR or native BGRA): that is the cost of moving 2.7 MB to the GPU. Possible tearing is the
+trade-off (`--vsync` removes it at the cost of up to one refresh).
 
 ### 7. Newest-frame-only capture
 The capture thread overwrites a single slot instead of filling a queue. If any stage gets slow,
@@ -85,10 +91,9 @@ frames are dropped (logged as `dropped`) rather than delayed, so latency cannot 
 - **mediapipe 1.0.1:** aborts on macOS even with the CPU delegate
   (`graph_service.h: Check failed: service_ Service is unavailable`), so it is pinned to 0.10.35.
 - **Python 3.14:** no mediapipe wheels, so the project uses 3.12.
-- **Duplicate SDL2:** every OpenCV wheel (4.x, 5.x, headless) bundles SDL2 through FFmpeg, and
-  pygame ships its own. macOS warns `Class SDL... is implemented in both`. We import pygame first
-  so its classes are the ones registered. OpenCV's copy is never used (only by FFmpeg's SDL
-  output device). The 60 s soak test was clean. Fallback: `--display cv`.
+- **Duplicate SDL2 with pygame:** every OpenCV wheel (4.x, 5.x, headless) bundles SDL2 through
+  FFmpeg. Using pygame as well loads two SDL copies (`Class SDL... is implemented in both`),
+  which is one reason the display moved to pyglet.
 - **MediaPipe telemetry:** 0.10.35 tries to upload usage logs ("clearcut uploader") and
   logs an error when it fails. No opt-out was found; it does not affect results.
 

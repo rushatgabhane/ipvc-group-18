@@ -11,7 +11,7 @@ The only controller is computer vision on a single webcam.
 | T1 Face tracking & augmented effects | _TBD_ | `highnoon/vision/perception.py` (face), `highnoon/render/` (face effects) |
 | T2 Body pose & motion tracking | _TBD_ | `highnoon/vision/perception.py` (pose), `highnoon/vision/motion.py`, `highnoon/core/filters.py` |
 | T3 Multiplayer identity tracking | _TBD_ | `highnoon/tracking/identity.py` |
-| T4 Player interaction & game control | _TBD_ | `highnoon/game/` (to be added) |
+| T4 Player interaction & game control | _TBD_ | `highnoon/game/` |
 | T5 Scene processing & integration | _TBD_ | `highnoon/app.py`, `highnoon/render/`, `highnoon/core/` |
 
 ## Setup (tested on macOS, Apple Silicon)
@@ -39,7 +39,25 @@ python3.12 -m venv .venv
 .venv/bin/python -m highnoon --help          # all options
 ```
 
-Keys: `q`/`esc` quit, `d` toggle debug overlay, `b` toggle background replacement, `f` fullscreen.
+Keys: `q`/`esc` quit, `r` restart round, `d` toggle debug overlay, `b` toggle background,
+`f` fullscreen.
+
+## How to play
+
+Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in frame.
+
+| Action | Movement |
+|---|---|
+| **Aim** | Stretch one arm out. A laser sight follows it, and the dot turns red when it is on a target |
+| **Shoot** | Hold your aim for a moment, then flick your arm **up** quickly (like recoil). The shot goes where you aimed *before* the flick |
+| **Duck** | Squat down. You are safe behind your crate but cannot shoot |
+| **Reload** | Lower both arms and hold for 0.7 s (6 bullets per magazine) |
+
+- **One player in view: practice mode.** Shoot the bottles.
+- **Two players: duel.** A body hit costs 15 HP and a headshot 35. First to 0 loses the round.
+  Bullets take 0.25 s to arrive, so you can duck when you see your opponent flick.
+
+All thresholds are in `GameConfig` (`highnoon/config.py`).
 
 On first run macOS will ask for camera permission for your terminal app.
 
@@ -94,12 +112,17 @@ highnoon/
     profiler.py        per-stage timing, FPS, latency, CSV export
   vision/
     perception.py      MediaPipe pose + face inference, parallel (T1/T2)
-    motion.py          per-player keypoint smoothing (T2)
+    motion.py          per-player keypoint smoothing + control signals (T2)
   tracking/
     identity.py        persistent player ids, face-to-player assignment (T3)
   render/
-    renderer.py        background compositing, overlays, HUD (T5)
-    display.py         pygame / OpenCV window output
+    renderer.py        background compositing, overlays, debug panel (T5)
+    game_view.py       crates, laser sights, tracers, hit effects, HUD (T4/T5)
+    display.py         pyglet (OpenGL) / OpenCV window output
+  game/
+    actions.py         fire / duck / reload state machines (T4)
+    game.py            rules: shots, hits, HP, rounds, practice targets (T4)
+    geometry.py        2D ray casting against hitboxes and cover
 tools/
   download_models.py   fetch + verify model weights
   record.py            record raw webcam clips for repeatable tests
@@ -111,7 +134,7 @@ docs/PERFORMANCE.md    measurements and design decisions
 ## Dependencies
 
 Pinned in `requirements.txt`: mediapipe 0.10.35 (1.0.x crashes on macOS), opencv-contrib-python
-5.0.0, numpy, scipy, pygame-ce. Model weights are not in the repo. `tools/download_models.py`
+5.0.0, numpy, scipy, pyglet. Model weights are not in the repo. `tools/download_models.py`
 fetches them from Google's MediaPipe model storage and checks their sha256.
 
 ## AI usage

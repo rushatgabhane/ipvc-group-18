@@ -64,9 +64,34 @@ class TrackingConfig:
 
 
 @dataclass
+class GameConfig:
+    """T4 rules and action thresholds. Distances are in torso lengths (scale-invariant)."""
+
+    # Fire: a quick upward "recoil" flick of the aiming arm.
+    flick_rise_deg: float = 20.0  # elevation gain that counts as a flick ...
+    flick_window_s: float = 0.15  # ... within this time window
+    armed_after_s: float = 0.3  # arm must aim steadily this long first (raising the arm is not a shot)
+    fire_cooldown_s: float = 0.35
+    # Duck: shoulders drop relative to the player's own standing height. Hysteresis avoids flicker.
+    duck_enter: float = 0.35
+    duck_exit: float = 0.20
+    # Reload: lower both arms and hold.
+    reload_hold_s: float = 0.7
+    max_ammo: int = 6
+    max_hp: int = 100
+    body_damage: int = 15
+    head_damage: int = 35
+    # Bullets take time to arrive so the target can react (duck) after seeing the shot.
+    bullet_travel_s: float = 0.25
+    cover_top: float = 0.45  # crate top, torso lengths below the standing shoulder line
+    round_end_s: float = 4.0
+    practice_targets: int = 3
+
+
+@dataclass
 class DisplayConfig:
     enabled: bool = True
-    backend: str = "pygame"  # "pygame" (~2.9 ms/frame) or "cv" (~16 ms/frame on macOS)
+    backend: str = "gl"  # "gl" = pyglet/OpenGL (~2.3 ms/frame) or "cv" (~16 ms/frame on macOS)
     vsync: bool = False  # vsync removes tearing but blocks up to one refresh (~16 ms at 60 Hz)
     window_name: str = "HIGH NOON"
     show_debug: bool = True
@@ -79,6 +104,7 @@ class Config:
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
     filters: FilterConfig = field(default_factory=FilterConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
+    game: GameConfig = field(default_factory=GameConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
     metrics_csv: Path | None = None  # per-frame timings for the report
     max_frames: int | None = None  # stop after N displayed frames (benchmarks)

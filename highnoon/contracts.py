@@ -67,6 +67,19 @@ class Perception:
     timings: dict[str, float] = field(default_factory=dict)  # stage name -> ms, for the profiler
 
 
+@dataclass(slots=True)
+class MotionSignals:
+    """Geometric control signals derived from smoothed keypoints (T2). Scale-invariant where possible."""
+
+    torso_len: float  # px, shoulder-mid to hip-mid; the unit for distance-independent thresholds
+    shoulder_y: float  # px, shoulder midpoint height (for ducking)
+    aim_valid: bool  # an arm is extended with reliable shoulder/elbow/wrist
+    aim_origin: np.ndarray  # (2,) px, wrist of the aiming arm (where the shot starts)
+    aim_dir: np.ndarray  # (2,) unit vector shoulder -> wrist
+    elevation: float  # rad, aiming-arm angle above horizontal (left/right independent)
+    arms_down: bool  # both wrists hang below the hips (gun lowered)
+
+
 @dataclass
 class Player:
     """A persistent identity (T3). Filled in progressively by T2/T1/T4."""
@@ -75,7 +88,6 @@ class Player:
     pose: PoseObservation | None = None  # latest raw pose assigned to this player
     face: FaceObservation | None = None
     smoothed: np.ndarray | None = None  # (33, 2) filtered keypoints (T2)
+    signals: MotionSignals | None = None  # (T2)
     last_seen: float = 0.0
     visible: bool = False
-    hp: int = 100
-    extra: dict = field(default_factory=dict)  # scratch space for game modules

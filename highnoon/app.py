@@ -7,7 +7,7 @@ Threads:
 
 The main thread always processes the newest perception result. If it is slower than
 inference, frames are dropped rather than queued, which keeps latency bounded.
-Window/event handling (SDL or HighGUI) must run on the main thread on macOS.
+Window/event handling (Cocoa via pyglet or HighGUI) must run on the main thread on macOS.
 """
 
 from __future__ import annotations
@@ -17,13 +17,14 @@ import time
 from highnoon.config import Config
 from highnoon.core.capture import open_source
 from highnoon.core.profiler import Profiler
+from highnoon.game.game import Game
 from highnoon.render.display import open_display
 from highnoon.render.renderer import Renderer
 from highnoon.tracking.identity import IdentityTracker
 from highnoon.vision.motion import MotionFilter
 from highnoon.vision.perception import Perceiver, PerceptionWorker
 
-KEY_HELP = "q/esc quit | d debug overlay | b background | f fullscreen"
+KEY_HELP = "q/esc quit | r restart round | d debug overlay | b background | f fullscreen"
 
 
 def run(cfg: Config) -> Profiler:
@@ -33,6 +34,7 @@ def run(cfg: Config) -> Profiler:
     tracker = IdentityTracker(cfg.tracking, cfg.perception.max_players)
     motion = MotionFilter(cfg.filters)
     renderer = Renderer(cfg.display)
+    game = Game(cfg.game, (cfg.capture.width, cfg.capture.height))
 
     display = None
     if cfg.display.enabled:
@@ -62,9 +64,11 @@ def run(cfg: Config) -> Profiler:
                 players = tracker.update(perception)
             with profiler.stage("filter"):
                 motion.update(players, frame.t_capture, tracker.reassigned)
-            # T4 game logic will run here: game.update(players, frame.t_capture)
+            with profiler.stage("game"):
+                game.width, game.height = frame.size
+                game.update(players, frame.t_capture, tracker.reassigned)
             with profiler.stage("render"):
-                output = renderer.render(perception, players, profiler)
+                output = renderer.render(perception, players, game, profiler)
 
             if display is not None:
                 with profiler.stage("display"):
@@ -75,6 +79,8 @@ def run(cfg: Config) -> Profiler:
                     cfg.display.show_debug = not cfg.display.show_debug
                 if "b" in keys:
                     cfg.display.background = not cfg.display.background
+                if "r" in keys:
+                    game.reset_round()
                 if "f" in keys:
                     display.toggle_fullscreen()
 
