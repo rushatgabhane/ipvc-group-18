@@ -7,6 +7,7 @@ __pycache__/
 
 # downloaded by tools/download_models.py
 models/*.task
+models/.delegate_cache.json
 
 # recorded test clips and benchmark output (large / personal footage)
 clips/

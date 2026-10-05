@@ -37,6 +37,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m highnoon                 # webcam 0, 1280x720
 .venv/bin/python -m highnoon --source 1      # another camera
 .venv/bin/python -m highnoon --help          # all options
+.venv/bin/python -m highnoon --delegate cpu  # force CPU inference (default: auto)
 ```
 
 Keys: `q`/`esc` quit, `r` restart round, `d` toggle debug overlay, `b` toggle background,
@@ -67,6 +68,12 @@ To tune from a recording: `python tools/record.py clips/moves.mp4`, then
 reloads, and writes a per-frame CSV and an annotated video to `results/`.
 
 On first run macOS will ask for camera permission for your terminal app.
+
+**GPU:** with the default `--delegate auto`, Windows and Linux use the GPU if it works. The first
+run tests it in a separate process (a broken GPU delegate can crash MediaPipe outright), falls back
+to CPU if needed, and caches the answer in `models/.delegate_cache.json`. macOS always uses CPU
+because the GPU delegate crashes there. MediaPipe officially supports GPU only on Ubuntu, so on
+Windows compare speeds first: `python tools/bench_models.py --delegate gpu` vs `--delegate cpu`.
 
 ## Testing and benchmarking
 

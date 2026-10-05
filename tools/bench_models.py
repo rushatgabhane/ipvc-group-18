@@ -56,6 +56,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="0")
     ap.add_argument("--frames", type=int, default=60)
+    ap.add_argument("--delegate", choices=["auto", "cpu", "gpu"], default="cpu")
     a = ap.parse_args()
     frames = grab_frames(a.source, a.frames)
     print(f"{len(frames)} frames at {frames[0].shape[1]}x{frames[0].shape[0]}\n")
@@ -69,7 +70,7 @@ def main() -> None:
         "pose full + seg + face, parallel": dict(pose_model="pose_landmarker_full"),
     }
     for label, overrides in variants.items():
-        cfg = PerceptionConfig()
+        cfg = PerceptionConfig(delegate=a.delegate)
         for k, v in overrides.items():
             setattr(cfg, k, v)
         bench(label, cfg, frames)

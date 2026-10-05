@@ -102,7 +102,11 @@ frames are dropped (logged as `dropped`) rather than delayed, so latency cannot 
 
 ## Platform issues found
 
-- **GPU delegate:** aborts the process on macOS at graph creation, so we use CPU only.
+- **GPU delegate:** aborts the process on macOS at graph creation, so macOS uses CPU. MediaPipe
+  documents GPU support for Python tasks as "limited to Ubuntu". `--delegate auto` (the default)
+  therefore tests the GPU in a subprocess on Windows/Linux and only uses it if that succeeds. On
+  this Mac the probe aborted as expected; the game fell back to CPU without crashing, and later
+  runs answered from the cache. **Not yet measured on a Windows machine.**
 - **mediapipe 1.0.1:** aborts on macOS even with the CPU delegate
   (`graph_service.h: Check failed: service_ Service is unavailable`), so it is pinned to 0.10.35.
 - **Python 3.14:** no mediapipe wheels, so the project uses 3.12.

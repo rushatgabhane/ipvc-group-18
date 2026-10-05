@@ -21,6 +21,10 @@ def parse_args() -> Config:
     ap.add_argument("--no-face", action="store_true", help="disable face landmarker")
     ap.add_argument("--no-seg", action="store_true", help="disable segmentation mask / background")
     ap.add_argument("--sequential", action="store_true", help="run pose and face sequentially")
+    ap.add_argument(
+        "--delegate", choices=["auto", "cpu", "gpu"], default="auto",
+        help="inference device; auto = GPU on Windows/Linux when it works, else CPU",
+    )  # fmt: skip
     ap.add_argument("--headless", action="store_true", help="no window (benchmarks)")
     ap.add_argument("--display", choices=["gl", "cv"], default="gl", help="window backend")
     ap.add_argument("--vsync", action="store_true", help="sync to display refresh (adds latency)")
@@ -38,6 +42,7 @@ def parse_args() -> Config:
     cfg.perception.run_face = not a.no_face
     cfg.perception.segmentation = not a.no_seg
     cfg.perception.parallel = not a.sequential
+    cfg.perception.delegate = a.delegate
     cfg.display.enabled = not a.headless
     cfg.display.backend = a.display
     cfg.display.vsync = a.vsync

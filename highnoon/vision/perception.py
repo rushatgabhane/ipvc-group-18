@@ -12,7 +12,8 @@ Performance design (numbers from an M1 Pro, CPU; see docs/PERFORMANCE.md):
   * Hands (fist trigger) cost ~15 ms *per hand* (31 ms for two), more than pose. They run
     on their own thread at whatever rate they manage; each frame takes the newest finished
     hand result (1-2 frames old) instead of waiting, so hands never lower the frame rate.
-  * The GPU delegate aborts the process on macOS (mediapipe 0.10.35 / 1.0.1), so CPU only.
+  * CPU or GPU is chosen by vision/delegate.py: on Windows/Linux the GPU is used when a probe
+    shows it works. The GPU delegate aborts the process on macOS, so macOS stays on CPU.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from mediapipe.tasks.python import BaseOptions, vision
 from highnoon.config import PerceptionConfig
 from highnoon.contracts import FaceObservation, Frame, HandObservation, Perception, PoseObservation
 from highnoon.core.capture import FrameSource
+from highnoon.vision.delegate import resolve_delegate
 
 
 class Perceiver:
@@ -42,10 +44,11 @@ class Perceiver:
         for path in paths:
             if not path.exists():
                 raise FileNotFoundError(f"{path} missing - run: python tools/download_models.py")
+        self.delegate = resolve_delegate(cfg)
 
         self.pose = vision.PoseLandmarker.create_from_options(
             vision.PoseLandmarkerOptions(
-                base_options=BaseOptions(model_asset_path=str(cfg.pose_model_path)),
+                base_options=BaseOptions(model_asset_path=str(cfg.pose_model_path), delegate=self.delegate),
                 running_mode=vision.RunningMode.VIDEO,
                 num_poses=cfg.max_players,
                 min_pose_detection_confidence=cfg.min_detection_confidence,
@@ -58,7 +61,9 @@ class Perceiver:
         if cfg.run_face:
             self.face = vision.FaceLandmarker.create_from_options(
                 vision.FaceLandmarkerOptions(
-                    base_options=BaseOptions(model_asset_path=str(cfg.face_model_path)),
+                    base_options=BaseOptions(
+                        model_asset_path=str(cfg.face_model_path), delegate=self.delegate
+                    ),
                     running_mode=vision.RunningMode.VIDEO,
                     num_faces=cfg.max_players,
                     min_face_detection_confidence=cfg.min_detection_confidence,
@@ -70,7 +75,9 @@ class Perceiver:
         if cfg.run_hands:
             landmarker = vision.HandLandmarker.create_from_options(
                 vision.HandLandmarkerOptions(
-                    base_options=BaseOptions(model_asset_path=str(cfg.hand_model_path)),
+                    base_options=BaseOptions(
+                        model_asset_path=str(cfg.hand_model_path), delegate=self.delegate
+                    ),
                     running_mode=vision.RunningMode.VIDEO,
                     num_hands=cfg.max_hands,
                     min_hand_detection_confidence=cfg.min_detection_confidence,

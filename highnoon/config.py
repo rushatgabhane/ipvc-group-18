@@ -40,6 +40,9 @@ class PerceptionConfig:
     hands_async: bool = True  # False = run inline (deterministic, for clip analysis)
     # Pose and face run on separate threads: measured 36.7 ms sequential -> 25.7 ms parallel.
     parallel: bool = True
+    # "auto": GPU on Windows/Linux if a subprocess probe shows it works, else CPU (vision/delegate.py).
+    # macOS stays on CPU: the GPU delegate aborts the process there.
+    delegate: str = "auto"
     min_detection_confidence: float = 0.5
     min_presence_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
