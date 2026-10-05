@@ -91,6 +91,7 @@ class MotionSignals:
     elevation: float  # rad, aiming-arm angle above horizontal (left/right independent)
     arms_down: bool  # both wrists hang below the hips (gun lowered)
     hand_openness: float | None = None  # openness of the aiming hand, None if no hand detected
+    head_y: float = 0.0  # px, head centre height (face box centre, else nose)
 
 
 @dataclass

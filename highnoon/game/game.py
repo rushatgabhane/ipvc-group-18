@@ -22,7 +22,6 @@ from highnoon.game.actions import ActionFrame, PlayerActions, Shot
 from highnoon.game.geometry import ray_circle, ray_exit_distance, ray_polygon, rect_polygon
 
 L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, NOSE = 11, 12, 23, 24, 0
-COVER_FOLLOW = 0.15  # crate x follows the player with this lerp factor per frame
 
 
 @dataclass
@@ -42,7 +41,6 @@ class PlayerState:
     hp: int
     ammo: int
     frame: ActionFrame = field(default_factory=ActionFrame)
-    cover: Cover | None = None
     last_hit_t: float = -math.inf
 
 
@@ -118,8 +116,7 @@ class Game:
             st = self.states.get(p.id)
             if st is None:  # never seen yet
                 continue
-            st.frame = st.actions.update(p.signals if p.visible else None, t)
-            self._update_cover(p, st)
+            st.frame = st.actions.update(p.signals if p.visible else None, t, self.height)
             if st.frame.reload and st.ammo < self.cfg.max_ammo:
                 st.ammo = self.cfg.max_ammo
             if st.frame.shot is not None and self.round_over_t is None:
@@ -128,6 +125,11 @@ class Game:
         self._resolve_bullets(t)
         self._update_aims(players)
         self.effects = [e for e in self.effects if t - e.t < 0.8]
+
+    @property
+    def cover(self) -> Cover:
+        """The static wall along the bottom of the screen."""
+        return Cover(0.0, (1.0 - self.cfg.cover_height) * self.height, float(self.width), float(self.height))
 
     def reset_round(self) -> None:
         for st in self.states.values():
@@ -188,12 +190,13 @@ class Game:
             if dist is not None and dist < best:
                 best, hit = dist, what
 
+        # The wall blocks every shot that reaches it, including shots fired from behind it.
+        consider(ray_polygon(origin, direction, self.cover.polygon()), ("cover", None))
+
         for pid, p in self._players.items():
             if pid == shooter or not p.visible or p.smoothed is None:
                 continue
             st = self.states[pid]
-            if st.cover is not None:
-                consider(ray_polygon(origin, direction, st.cover.polygon()), ("cover", pid))
             head, torso = self._hitboxes(p)
             if st.frame.ducked:
                 # Behind cover: anything that would have hit the player is stopped by the crate.
@@ -222,22 +225,7 @@ class Game:
         torso = center + (quad - center) * 1.15
         return head, torso
 
-    # ---------------------------------------------------------------- cover, aims, targets
-    def _update_cover(self, p: Player, st: PlayerState) -> None:
-        acts = st.actions
-        if not p.visible or p.smoothed is None or acts.ref_shoulder is None:
-            return
-        kp = p.smoothed
-        hip_x = float((kp[L_HIP][0] + kp[R_HIP][0]) / 2)
-        half_w = 0.9 * acts.ref_torso
-        top = acts.ref_shoulder + self.cfg.cover_top * acts.ref_torso
-        if st.cover is None:
-            st.cover = Cover(hip_x - half_w, top, hip_x + half_w, self.height)
-            return
-        cx = (st.cover.x0 + st.cover.x1) / 2
-        cx += COVER_FOLLOW * (hip_x - cx)
-        st.cover = Cover(cx - half_w, top, cx + half_w, self.height)
-
+    # ---------------------------------------------------------------- aims, targets
     def _update_aims(self, players: list[Player]) -> None:
         self.aims = {}
         for p in players:
@@ -258,25 +246,30 @@ class Game:
                 self._spawn_target(target, player)
 
     def _spawn_target(self, target: Target, player: Player) -> None:
-        """Place a bottle where it is reachable but not on the player or another bottle."""
+        """Place a bottle above the wall, clear of the player's head and of other bottles."""
         radius = 0.04 * self.height
-        kp = player.smoothed if player.smoothed is not None else None
-        if kp is not None:
-            body_x0 = float(min(kp[L_SHOULDER][0], kp[R_SHOULDER][0]))
-            body_x1 = float(max(kp[L_SHOULDER][0], kp[R_SHOULDER][0]))
-            margin = 0.5 * (player.signals.torso_len if player.signals else 100.0) + radius
+        # Keep clear of the head. Shoulders are a poor guide: when a player sits close to the
+        # camera they are off-screen and their estimated span covers most of the frame.
+        if player.face is not None:
+            body_x0, body_x1 = float(player.face.bbox[0]), float(player.face.bbox[2])
+            margin = radius + 20
+        elif player.smoothed is not None:
+            body_x0 = body_x1 = float(player.smoothed[NOSE][0])
+            margin = radius + 0.4 * (player.signals.torso_len if player.signals else 100.0)
         else:
             body_x0 = body_x1 = self.width / 2
             margin = 0.0
         others = [t.center for t in self.targets if t.alive and t is not target]
         top = 0.18 * self.height  # keep clear of the banner
+        bottom = (1.0 - self.cfg.cover_height) * self.height - 2 * radius  # above the wall
         center = None
-        for _ in range(30):  # rejection sampling; the free area is large, so this rarely loops
+        for attempt in range(40):  # rejection sampling
             c = np.array(
-                [self._rng.uniform(0.06, 0.94) * self.width, self._rng.uniform(top, 0.6 * self.height)],
+                [self._rng.uniform(0.06, 0.94) * self.width, self._rng.uniform(top, bottom)],
                 np.float32,
             )
-            if body_x0 - margin < c[0] < body_x1 + margin:
+            # After 20 failed tries (player fills the frame), allow spots in front of the player.
+            if attempt < 20 and body_x0 - margin < c[0] < body_x1 + margin:
                 continue
             if any(np.linalg.norm(c - o) < 4 * radius for o in others):
                 continue

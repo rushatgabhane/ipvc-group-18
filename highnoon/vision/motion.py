@@ -59,6 +59,11 @@ class MotionFilter:
             p.signals = self._signals(p.id, p.smoothed, reliable)
             hand = p.hands.get(ARMS[self._aim_arm[p.id]][2])
             p.signals.hand_openness = hand.openness if hand is not None else None
+            p.signals.head_y = (
+                float((p.face.bbox[1] + p.face.bbox[3]) / 2)
+                if p.face is not None
+                else float(p.smoothed[0][1])
+            )
 
     def _signals(self, player_id: int, kp: np.ndarray, reliable: np.ndarray) -> MotionSignals:
         shoulder_mid = (kp[L_SHOULDER] + kp[R_SHOULDER]) / 2

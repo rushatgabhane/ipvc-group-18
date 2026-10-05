@@ -9,8 +9,8 @@ trigger an action by itself:
           trigger "flick": AIMING --quick upward arm flick--> FIRED.
           Both use the aim from slightly *before* the trigger: closing the hand or flicking
           moves the arm a little, which would otherwise pull the shot off target.
-  duck    STANDING --drop > duck_enter--> DUCKED --drop < duck_exit--> STANDING
-          drop = shoulder fall relative to the player's own standing height, in torso lengths.
+  duck    STANDING --head below the wall top--> DUCKED --head duck_margin above it--> STANDING
+          The wall is fixed: it covers the bottom cover_height of the screen.
   reload  both arms down for reload_hold_s -> one reload event (re-armed when the arms come up)
 """
 
@@ -25,9 +25,6 @@ import numpy as np
 from highnoon.config import GameConfig
 from highnoon.contracts import MotionSignals
 
-STAND_REF_UP = 0.3  # standing reference follows upward moves quickly (player stands up straight) ...
-STAND_REF_DOWN = 0.02  # ... and downward moves slowly, so a duck is not absorbed into the reference
-
 
 @dataclass(slots=True)
 class Shot:
@@ -41,7 +38,7 @@ class ActionFrame:
     ducked: bool = False
     shot: Shot | None = None
     reload: bool = False
-    duck_drop: float = 0.0
+    head_pos: float = 0.0  # head height as a fraction of the screen (0 = top, 1 = bottom)
     hand_closed: bool | None = None  # None = aiming hand not tracked
 
 
@@ -53,21 +50,11 @@ class PlayerActions:
         self._aim_since: float | None = None
         self._last_shot = -math.inf
         self.ducked = False
-        self._ref_shoulder: float | None = None
-        self._ref_torso: float | None = None
         self._arms_down_since: float | None = None
         self._reload_done = False
         self._hand_closed: bool | None = None
 
-    @property
-    def ref_shoulder(self) -> float | None:
-        return self._ref_shoulder
-
-    @property
-    def ref_torso(self) -> float | None:
-        return self._ref_torso
-
-    def update(self, sig: MotionSignals | None, t: float) -> ActionFrame:
+    def update(self, sig: MotionSignals | None, t: float, frame_height: int) -> ActionFrame:
         if sig is None:
             self._history.clear()
             self._aim_since = None
@@ -75,27 +62,22 @@ class PlayerActions:
             self._hand_closed = None
             return ActionFrame(ducked=self.ducked)
         out = ActionFrame()
-        out.duck_drop = self._update_duck(sig)
+        out.head_pos = self._update_duck(sig, frame_height)
         out.ducked = self.ducked
         out.reload = self._update_reload(sig, t)
         out.aiming, out.shot = self._update_fire(sig, t)
         out.hand_closed = self._hand_closed
         return out
 
-    def _update_duck(self, sig: MotionSignals) -> float:
-        if self._ref_shoulder is None:
-            self._ref_shoulder, self._ref_torso = sig.shoulder_y, sig.torso_len
-        drop = (sig.shoulder_y - self._ref_shoulder) / self._ref_torso
+    def _update_duck(self, sig: MotionSignals, frame_height: int) -> float:
+        head_pos = sig.head_y / frame_height
+        wall_top = 1.0 - self.cfg.cover_height
         if self.ducked:
-            if drop < self.cfg.duck_exit:
+            if head_pos < wall_top - self.cfg.duck_margin:
                 self.ducked = False
-        elif drop > self.cfg.duck_enter:
+        elif head_pos > wall_top:
             self.ducked = True
-        if not self.ducked:  # the reference is frozen while ducked
-            rate = STAND_REF_UP if sig.shoulder_y < self._ref_shoulder else STAND_REF_DOWN
-            self._ref_shoulder += rate * (sig.shoulder_y - self._ref_shoulder)
-            self._ref_torso += 0.05 * (sig.torso_len - self._ref_torso)
-        return drop
+        return head_pos
 
     def _update_reload(self, sig: MotionSignals, t: float) -> bool:
         if not sig.arms_down:

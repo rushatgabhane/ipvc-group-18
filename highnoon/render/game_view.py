@@ -1,6 +1,6 @@
 """T5: draws the game layer on top of the composited camera image.
 
-Draw order matters: crates are drawn after the players, so they occlude the lower body.
+Draw order matters: the wall is drawn after the players, so it occludes their lower body.
 A ducking player really disappears behind cover.
 Everything uses OpenCV primitives on small regions, never full-frame per-pixel numpy ops.
 """
@@ -19,10 +19,7 @@ WOOD, WOOD_DARK = (40, 95, 150), (25, 60, 100)
 
 
 def draw_game(image: np.ndarray, game: Game, players: list[Player], t: float, colors: dict) -> None:
-    for p in players:
-        st = game.states.get(p.id)
-        if p.visible and st is not None and st.cover is not None:
-            _draw_crate(image, st.cover)
+    _draw_crate(image, game.cover)
     for target in game.targets:
         if target.alive:
             _draw_bottle(image, target.center, target.radius)
@@ -38,9 +35,9 @@ def draw_game(image: np.ndarray, game: Game, players: list[Player], t: float, co
         _draw_effect(image, e, t)
     for p in players:
         st = game.states.get(p.id)
-        if p.visible and st is not None and st.frame.ducked and st.cover is not None:
-            cx = int((st.cover.x0 + st.cover.x1) / 2)
-            _text_center(image, "DUCKED", (cx, int(st.cover.y0) - 10), 0.7, colors.get(p.id, WHITE), 2)
+        if p.visible and st is not None and st.frame.ducked and p.smoothed is not None:
+            cx = int(p.smoothed[0][0])
+            _text_center(image, "DUCKED", (cx, int(game.cover.y0) - 18), 0.8, colors.get(p.id, WHITE), 2)
     _draw_hud(image, game, {p.id for p in players if p.visible}, colors, t)
 
 
@@ -61,12 +58,15 @@ def _draw_crate(image: np.ndarray, c) -> None:
     if x1 <= x0 or y1 <= y0:
         return
     cv2.rectangle(image, (x0, y0), (x1, y1), WOOD, -1)
-    plank = max(12, (y1 - y0) // 5)
+    plank = max(12, (y1 - y0) // 4)
     for y in range(y0 + plank, y1, plank):
         cv2.line(image, (x0, y), (x1, y), WOOD_DARK, 2)
-    cv2.line(image, (x0, y0), (x1, y1), WOOD_DARK, 4)
-    cv2.line(image, (x1, y0), (x0, y1), WOOD_DARK, 4)
-    cv2.rectangle(image, (x0, y0), (x1, y1), WOOD_DARK, 5)
+    post = max(40, (x1 - x0) // 8)  # vertical posts, staggered per plank row like a wooden wall
+    for row, y in enumerate(range(y0, y1, plank)):
+        offset = (row % 2) * post // 2
+        for x in range(x0 + offset, x1, post):
+            cv2.line(image, (x, y), (x, min(y + plank, y1)), WOOD_DARK, 2)
+    cv2.line(image, (x0, y0), (x1, y0), WOOD_DARK, 6)  # top edge = the duck line
 
 
 def _draw_bottle(image: np.ndarray, center: np.ndarray, r: float) -> None:
@@ -142,10 +142,11 @@ def _draw_hud(image: np.ndarray, game: Game, visible: set[int], colors: dict, t:
         if st.ammo == 0:
             cv2.putText(image, "lower arms to reload", (x + 140, y + 44), FONT, 0.5, YELLOW, 1, cv2.LINE_AA)
 
+    trigger = "close your hand" if cfg.trigger == "fist" else "flick it up"
     banner = {
         "idle": "Step into view",
-        "practice": "PRACTICE - point your arm, flick it up to shoot the bottles",
-        "duel": "DUEL - duck behind your crate to dodge",
+        "practice": f"PRACTICE - point your arm, {trigger} to shoot the bottles",
+        "duel": "DUEL - duck below the wall to dodge",
     }[game.mode]
     _text_center(image, banner, (w // 2, 30), 0.75, WHITE, 2)
     if game.winner is not None:
@@ -164,20 +165,29 @@ def draw_signal_debug(image: np.ndarray, game: Game, players: list[Player], colo
         s, f = p.signals, st.frame
         lines = [
             f"arm {s.extension:4.2f}  elev {np.degrees(s.elevation):+4.0f} (aim -50..80)",
-            f"aim {'ON' if f.aiming else 'off'}  drop {f.duck_drop:+.2f} (duck > {cfg.duck_enter:.2f})",
+            f"aim {'ON' if f.aiming else 'off'}  head {f.head_pos:.2f} (duck > {1 - cfg.cover_height:.2f})",
             f"arms down {'YES' if s.arms_down else 'no'}  ammo {st.ammo}",
             "hand: not tracked"
             if s.hand_openness is None
             else f"hand {s.hand_openness:4.2f} {'FIST' if f.hand_closed else 'open'}"
             f" (fist < {cfg.fist_closed:.2f}, open > {cfg.fist_open:.2f})",
         ]
-        # Under the face, where it stays on screen even when the shoulders are out of frame.
-        anchor = p.face.bbox[[0, 3]] if p.face is not None else p.smoothed[0]
-        x = int(anchor[0])
-        y = int(anchor[1]) + 25
+        # Beside the face (the side with more room), on a dark panel so it reads over anything.
+        h, w = image.shape[:2]
+        panel_w, line_h = 400, 20
+        panel_h = line_h * len(lines) + 12
+        if p.face is not None:
+            fx0, fy0, fx1, _ = p.face.bbox.astype(int)
+        else:
+            nose = p.smoothed[0].astype(int)
+            fx0, fy0, fx1 = nose[0] - 60, nose[1] - 60, nose[0] + 60
+        x = fx1 + 15 if w - fx1 > fx0 else fx0 - 15 - panel_w
+        x = min(max(5, x), w - panel_w - 5)
+        y = min(max(60, fy0), h - panel_h - 5)
+        roi = image[y : y + panel_h, x : x + panel_w]
+        cv2.addWeighted(roi, 0.3, np.zeros_like(roi), 0.7, 0, dst=roi)
         for i, text in enumerate(lines):
-            org = (min(max(5, x), image.shape[1] - 330), min(image.shape[0] - 160, y) + i * 20)
-            cv2.putText(image, text, org, cv2.FONT_HERSHEY_SIMPLEX, 0.5, BLACK, 4, cv2.LINE_AA)
+            org = (x + 8, y + 18 + i * line_h)
             cv2.putText(
                 image, text, org, cv2.FONT_HERSHEY_SIMPLEX, 0.5, colors.get(p.id, WHITE), 1, cv2.LINE_AA
             )

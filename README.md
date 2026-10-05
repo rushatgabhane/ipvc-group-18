@@ -50,7 +50,7 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 |---|---|
 | **Aim** | Point with your arm (straight, or just the forearm when sitting close). A laser sight follows it, and the dot turns red on a target |
 | **Shoot** | Aim with an **open hand**, then **close it into a fist**. Open it again before the next shot |
-| **Duck** | Squat down. You are safe behind your crate but cannot shoot |
+| **Duck** | Get your head below the top of the wall (the bottom 25% of the screen). You are safe there but cannot shoot |
 | **Reload** | Lower both arms and hold for 0.7 s (6 bullets per magazine) |
 
 - **One player in view: practice mode.** Shoot the bottles.

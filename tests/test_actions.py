@@ -7,14 +7,15 @@ from highnoon.contracts import MotionSignals
 from highnoon.game.actions import PlayerActions
 
 DT = 1 / 30
+H = 720  # frame height; the wall top is at 0.75 * H = 540
 FLICK = GameConfig(trigger="flick")
 
 
-def sig(elev_deg=0.0, aim=True, shoulder_y=300.0, arms_down=False, hand=None) -> MotionSignals:
+def sig(elev_deg=0.0, aim=True, head_y=200.0, arms_down=False, hand=None) -> MotionSignals:
     e = math.radians(elev_deg)
     return MotionSignals(
         torso_len=200.0,
-        shoulder_y=shoulder_y,
+        shoulder_y=head_y + 100,
         aim_valid=aim,
         extension=1.0,
         aim_origin=np.array([500.0, 300.0], np.float32),
@@ -22,13 +23,14 @@ def sig(elev_deg=0.0, aim=True, shoulder_y=300.0, arms_down=False, hand=None) ->
         elevation=e,
         arms_down=arms_down,
         hand_openness=hand,
+        head_y=head_y,
     )
 
 
 def run(actions, signals, t0=0.0):
     frames = []
     for i, s in enumerate(signals):
-        frames.append(actions.update(s, t0 + i * DT))
+        frames.append(actions.update(s, t0 + i * DT, H))
     return frames
 
 
@@ -67,18 +69,25 @@ def test_cooldown_blocks_rapid_second_shot():
     assert len(shots(frames)) == 2  # first flick, the immediate second is blocked, the late third fires
 
 
-def test_duck_hysteresis_and_no_shooting_while_ducked():
+def test_duck_when_head_goes_below_the_wall():
     acts = PlayerActions(FLICK)
-    standing = [sig(0, shoulder_y=300)] * 15
-    ducking = [sig(0, shoulder_y=300 + 200 * d) for d in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6)]
-    half_up = [sig(0, shoulder_y=300 + 200 * 0.3)] * 5  # between exit (0.2) and enter (0.35)
-    frames = run(acts, standing + ducking + half_up)
-    assert not frames[14].ducked
-    assert frames[-6].ducked  # entered at drop 0.4
-    assert frames[-1].ducked  # still ducked at 0.3 thanks to hysteresis
-    assert not frames[-1].aiming
-    up = run(acts, [sig(0, shoulder_y=300)] * 3, t0=10)
-    assert not up[-1].ducked
+    standing = [sig(0, head_y=300)] * 5
+    down = [sig(0, head_y=y) for y in (400, 500, 545)]  # crosses the wall top at 540
+    near_edge = [sig(0, head_y=y) for y in (530, 525, 535)]  # within the 0.03 * 720 = 21.6 px margin
+    frames = run(acts, standing + down + near_edge)
+    assert not frames[6].ducked  # head at 500: still above the wall
+    assert frames[7].ducked
+    assert all(f.ducked for f in frames[8:])  # hysteresis: no flicker at the edge
+    assert not frames[-1].aiming  # cannot shoot while ducked
+    up = run(acts, [sig(0, head_y=510)], t0=10)
+    assert not up[-1].ducked  # 510 < 540 - 21.6
+
+
+def test_duck_is_absolute_not_relative_to_standing_height():
+    # A player who just stays low (e.g. sitting close to the camera) is ducked from the start,
+    # and one standing tall never is, however long they stay.
+    assert run(PlayerActions(FLICK), [sig(0, head_y=600)] * 3)[-1].ducked
+    assert not any(f.ducked for f in run(PlayerActions(FLICK), [sig(0, head_y=520)] * 90))
 
 
 def test_reload_after_hold_fires_once():

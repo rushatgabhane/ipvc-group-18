@@ -87,9 +87,11 @@ class GameConfig:
     flick_window_s: float = 0.15  # ... within this time window
     armed_after_s: float = 0.3  # arm must aim steadily this long first (raising the arm is not a shot)
     fire_cooldown_s: float = 0.35
-    # Duck: shoulders drop relative to the player's own standing height. Hysteresis avoids flicker.
-    duck_enter: float = 0.35
-    duck_exit: float = 0.20
+    # Duck: a fixed wall covers the bottom `cover_height` of the screen. A player is ducked while
+    # their head is below its top edge, and stands again once the head is `duck_margin` (fraction
+    # of screen height) above it. The margin is hysteresis, so jitter at the edge does not flicker.
+    cover_height: float = 0.25
+    duck_margin: float = 0.03
     # Reload: lower both arms and hold.
     reload_hold_s: float = 0.7
     max_ammo: int = 6
@@ -98,7 +100,6 @@ class GameConfig:
     head_damage: int = 35
     # Bullets take time to arrive so the target can react (duck) after seeing the shot.
     bullet_travel_s: float = 0.25
-    cover_top: float = 0.45  # crate top, torso lengths below the standing shoulder line
     round_end_s: float = 4.0
     practice_targets: int = 3
 

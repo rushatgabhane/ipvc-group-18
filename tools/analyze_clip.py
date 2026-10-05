@@ -34,7 +34,7 @@ from highnoon.vision.perception import Perceiver  # noqa: E402
 
 COLUMNS = [
     "frame", "t", "player", "visible", "extension", "elevation_deg", "aim_valid", "aiming",
-    "duck_drop", "ducked", "arms_down", "hand_openness", "hand_closed", "ammo", "hp", "event",
+    "head_pos", "ducked", "arms_down", "hand_openness", "hand_closed", "ammo", "hp", "event",
 ]  # fmt: skip
 
 
@@ -105,7 +105,7 @@ def main() -> None:
             writer.writerow([
                 frame.id, f"{t:.3f}", p.id, int(p.visible),
                 f"{s.extension:.3f}" if s else "", f"{np.degrees(s.elevation):.1f}" if s else "",
-                int(s.aim_valid) if s else "", int(st.frame.aiming), f"{st.frame.duck_drop:.3f}",
+                int(s.aim_valid) if s else "", int(st.frame.aiming), f"{st.frame.head_pos:.3f}",
                 int(st.frame.ducked), int(s.arms_down) if s else "",
                 f"{s.hand_openness:.3f}" if s and s.hand_openness is not None else "",
                 "" if st.frame.hand_closed is None else int(st.frame.hand_closed), st.ammo, st.hp,
