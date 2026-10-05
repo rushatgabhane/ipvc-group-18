@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# downloaded by tools/download_models.py
+models/*.task
+
+# recorded test clips and benchmark output (large / personal footage)
+clips/
+results/

@@ -1,0 +1,81 @@
+"""Data contracts between the five tasks.
+
+The pipeline for one frame:
+
+    Frame -> [T2 pose + T1 face inference] -> Perception
+          -> [T3 identity]  -> Players with persistent ids
+          -> [T2 filtering] -> smoothed keypoints / motion signals per player
+          -> [T4 game]      -> GameState
+          -> [T5 render]    -> displayed image
+
+All image coordinates are pixels in the (mirrored) capture frame, float32.
+Each module only reads the fields defined here. That keeps the task boundaries clean
+and lets every owner unit-test their module with synthetic inputs.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import numpy as np
+
+
+@dataclass(slots=True)
+class Frame:
+    id: int
+    image: np.ndarray  # HxWx3 uint8, BGR
+    t_capture: float  # time.perf_counter() seconds when the frame was grabbed
+    timestamp_ms: int  # monotonic ms for MediaPipe VIDEO mode
+
+    @property
+    def size(self) -> tuple[int, int]:
+        h, w = self.image.shape[:2]
+        return w, h
+
+
+@dataclass(slots=True)
+class PoseObservation:
+    """One detected body, before identity assignment (MediaPipe 33-keypoint layout)."""
+
+    keypoints: np.ndarray  # (33, 2) pixels
+    visibility: np.ndarray  # (33,) in [0, 1]
+    world: np.ndarray  # (33, 3) metres, hip-centred (MediaPipe world landmarks)
+
+    def center(self) -> np.ndarray:
+        """Torso centre (mean of shoulders and hips), robust to waving arms."""
+        return self.keypoints[[11, 12, 23, 24]].mean(axis=0)
+
+
+@dataclass(slots=True)
+class FaceObservation:
+    landmarks: np.ndarray  # (478, 2) pixels
+    bbox: np.ndarray  # (4,) x0, y0, x1, y1 pixels
+
+    def center(self) -> np.ndarray:
+        return np.array([(self.bbox[0] + self.bbox[2]) / 2, (self.bbox[1] + self.bbox[3]) / 2], np.float32)
+
+
+@dataclass(slots=True)
+class Perception:
+    """Raw model outputs for one frame. Produced on the perception thread."""
+
+    frame: Frame
+    poses: list[PoseObservation]
+    faces: list[FaceObservation]
+    mask: np.ndarray | None  # HxW float32 in [0, 1], union of all people; None if disabled
+    t_done: float  # perf_counter seconds when inference finished
+    timings: dict[str, float] = field(default_factory=dict)  # stage name -> ms, for the profiler
+
+
+@dataclass
+class Player:
+    """A persistent identity (T3). Filled in progressively by T2/T1/T4."""
+
+    id: int  # 1-based: Player 1, Player 2
+    pose: PoseObservation | None = None  # latest raw pose assigned to this player
+    face: FaceObservation | None = None
+    smoothed: np.ndarray | None = None  # (33, 2) filtered keypoints (T2)
+    last_seen: float = 0.0
+    visible: bool = False
+    hp: int = 100
+    extra: dict = field(default_factory=dict)  # scratch space for game modules

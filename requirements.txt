@@ -1,0 +1,7 @@
+# Python 3.12 (mediapipe has no wheels for 3.14 yet). Pinned to the tested versions.
+# mediapipe 1.0.x aborts on macOS at graph creation ("Service is unavailable"), so stay on 0.10.x.
+mediapipe==0.10.35
+opencv-contrib-python==5.0.0.93  # mediapipe depends on contrib; do not also install opencv-python
+numpy==2.5.3
+scipy==1.18.1
+pygame-ce==2.5.8  # display + sound; ~13 ms/frame faster than cv2.imshow on macOS
