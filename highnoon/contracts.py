@@ -56,6 +56,16 @@ class FaceObservation:
 
 
 @dataclass(slots=True)
+class HandObservation:
+    """One hand (MediaPipe 21-keypoint layout)."""
+
+    landmarks: np.ndarray  # (21, 2) pixels
+    world: np.ndarray  # (21, 3) metres, hand-centred: distances do not depend on viewing angle
+    openness: float  # mean fingertip-wrist distance / wrist-middle-knuckle distance (~1.9 open, ~0.9 fist)
+    frame_id: int  # frame the hand was detected in (hands run asynchronously, may lag 1-2 frames)
+
+
+@dataclass(slots=True)
 class Perception:
     """Raw model outputs for one frame. Produced on the perception thread."""
 
@@ -65,6 +75,7 @@ class Perception:
     mask: np.ndarray | None  # HxW float32 in [0, 1], union of all people; None if disabled
     t_done: float  # perf_counter seconds when inference finished
     timings: dict[str, float] = field(default_factory=dict)  # stage name -> ms, for the profiler
+    hands: list[HandObservation] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -74,10 +85,12 @@ class MotionSignals:
     torso_len: float  # px, shoulder-mid to hip-mid; the unit for distance-independent thresholds
     shoulder_y: float  # px, shoulder midpoint height (for ducking)
     aim_valid: bool  # an arm is extended with reliable shoulder/elbow/wrist
+    extension: float  # aiming arm shoulder-wrist distance, in torso lengths
     aim_origin: np.ndarray  # (2,) px, wrist of the aiming arm (where the shot starts)
     aim_dir: np.ndarray  # (2,) unit vector shoulder -> wrist
     elevation: float  # rad, aiming-arm angle above horizontal (left/right independent)
     arms_down: bool  # both wrists hang below the hips (gun lowered)
+    hand_openness: float | None = None  # openness of the aiming hand, None if no hand detected
 
 
 @dataclass
@@ -87,6 +100,7 @@ class Player:
     id: int  # 1-based: Player 1, Player 2
     pose: PoseObservation | None = None  # latest raw pose assigned to this player
     face: FaceObservation | None = None
+    hands: dict[int, HandObservation] = field(default_factory=dict)  # pose wrist index (15/16) -> hand
     smoothed: np.ndarray | None = None  # (33, 2) filtered keypoints (T2)
     signals: MotionSignals | None = None  # (T2)
     last_seen: float = 0.0

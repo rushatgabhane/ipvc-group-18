@@ -63,7 +63,7 @@ class Profiler:
     def summary(self) -> str:
         lines = [f"fps {self.fps():5.1f}"]
         for name, (mean, p95) in sorted(self.stats().items()):
-            unit = "fr" if name == "dropped" else "ms"
+            unit = "fr" if name in ("dropped", "hand_lag") else "ms"
             lines.append(f"{name:<14s} mean {mean:6.1f} {unit}   p95 {p95:6.1f} {unit}")
         return "\n".join(lines)
 

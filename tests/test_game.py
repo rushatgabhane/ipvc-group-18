@@ -38,7 +38,7 @@ def make_player(pid: int, x: float, shoulder_y: float = 300.0, aim_dir=(1.0, 0.0
     d = np.array(aim_dir, np.float32)
     d /= np.linalg.norm(d)
     elevation = float(np.arctan2(-d[1], abs(d[0])))
-    signals = MotionSignals(200.0, shoulder_y, aim, kp[12] + d * 150, d, elevation, False)
+    signals = MotionSignals(200.0, shoulder_y, aim, 1.0, kp[12] + d * 150, d, elevation, False)
     return Player(id=pid, pose=pose, smoothed=kp, signals=signals, visible=True)
 
 
@@ -61,7 +61,7 @@ def step(game, players_fn, n, t):
 
 
 def test_duel_shot_hits_standing_player_and_is_blocked_when_ducked():
-    game = Game(GameConfig(), (1280, 720))
+    game = Game(GameConfig(trigger="flick"), (1280, 720))
     aim = (1.0, 0.0)  # P1 at x=300 aims right at P2's shoulder line
     t = step(game, lambda: [make_player(1, 300, aim_dir=aim), make_player(2, 900)], 20, 0.0)
 

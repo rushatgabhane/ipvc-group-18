@@ -81,7 +81,22 @@ Texture upload is ~1.4 ms in every variant tried (pyglet ImageData, raw glTexSub
 BGR or native BGRA): that is the cost of moving 2.7 MB to the GPU. Possible tearing is the
 trade-off (`--vsync` removes it at the cost of up to one refresh).
 
-### 7. Newest-frame-only capture
+### 7. Hand tracking on its own thread
+The fist trigger needs MediaPipe's hand landmarker. Its cost scales with the number of hands:
+
+| num_hands | Per frame |
+|---|---|
+| 1 | 15.4 ms |
+| 2 | 31.3 ms (slower than pose) |
+| 4 | 49.5 ms |
+
+Running it inline would make it the critical path (about 20 fps with 4 hands). Instead it runs on a
+separate thread. Each frame is submitted without waiting, and the pipeline reads the newest
+finished hand result. Measured in the app: hand 17.9 ms per run, results 0 frames behind
+(`hand_lag`), still 30 fps with 0 dropped frames and 29.4 ms latency. `max_hands = 2` (one trigger
+hand per player) keeps the cost bounded.
+
+### 8. Newest-frame-only capture
 The capture thread overwrites a single slot instead of filling a queue. If any stage gets slow,
 frames are dropped (logged as `dropped`) rather than delayed, so latency cannot accumulate.
 

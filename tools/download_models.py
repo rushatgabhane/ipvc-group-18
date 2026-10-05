@@ -23,6 +23,10 @@ MODELS = {
         "pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task",
         "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad",
     ),
+    "hand_landmarker.task": (
+        "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task",
+        "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1",
+    ),
     "face_landmarker.task": (
         "face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
         "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",

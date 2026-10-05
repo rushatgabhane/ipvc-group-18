@@ -27,7 +27,7 @@ uv pip install -r requirements-dev.txt
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 
-# download model weights (~19 MB, verified by sha256)
+# download model weights (~27 MB, verified by sha256)
 .venv/bin/python tools/download_models.py
 ```
 
@@ -48,8 +48,8 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 
 | Action | Movement |
 |---|---|
-| **Aim** | Stretch one arm out. A laser sight follows it, and the dot turns red when it is on a target |
-| **Shoot** | Hold your aim for a moment, then flick your arm **up** quickly (like recoil). The shot goes where you aimed *before* the flick |
+| **Aim** | Point with your arm (straight, or just the forearm when sitting close). A laser sight follows it, and the dot turns red on a target |
+| **Shoot** | Aim with an **open hand**, then **close it into a fist**. Open it again before the next shot |
 | **Duck** | Squat down. You are safe behind your crate but cannot shoot |
 | **Reload** | Lower both arms and hold for 0.7 s (6 bullets per magazine) |
 
@@ -57,7 +57,14 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 - **Two players: duel.** A body hit costs 15 HP and a headshot 35. First to 0 loses the round.
   Bullets take 0.25 s to arrive, so you can duck when you see your opponent flick.
 
-All thresholds are in `GameConfig` (`highnoon/config.py`).
+All thresholds are in `GameConfig` (`highnoon/config.py`). Set `trigger = "flick"` to fire with an
+upward recoil flick of the arm instead of a fist (useful when standing too far away for hand tracking).
+With the debug overlay on (`d`), the live values the thresholds act on are shown under each
+player's face.
+
+To tune from a recording: `python tools/record.py clips/moves.mp4`, then
+`python tools/analyze_clip.py clips/moves.mp4`. That prints a timeline of detected shots, ducks and
+reloads, and writes a per-frame CSV and an annotated video to `results/`.
 
 On first run macOS will ask for camera permission for your terminal app.
 
@@ -125,6 +132,7 @@ highnoon/
     geometry.py        2D ray casting against hitboxes and cover
 tools/
   download_models.py   fetch + verify model weights
+  analyze_clip.py      replay a clip through the game, log signals + detected actions
   record.py            record raw webcam clips for repeatable tests
   bench_models.py      model / threading benchmark
 tests/                 pytest unit tests

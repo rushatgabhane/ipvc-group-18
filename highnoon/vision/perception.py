@@ -9,6 +9,9 @@ Performance design (numbers from an M1 Pro, CPU; see docs/PERFORMANCE.md):
     internally) and would only hurt small faces far from the camera.
   * The person segmentation mask comes out of the pose graph for ~0.3 ms extra, so no
     separate segmentation model is needed for background replacement (T5).
+  * Hands (fist trigger) cost ~15 ms *per hand* (31 ms for two), more than pose. They run
+    on their own thread at whatever rate they manage; each frame takes the newest finished
+    hand result (1-2 frames old) instead of waiting, so hands never lower the frame rate.
   * The GPU delegate aborts the process on macOS (mediapipe 0.10.35 / 1.0.1), so CPU only.
 """
 
@@ -24,7 +27,7 @@ import numpy as np
 from mediapipe.tasks.python import BaseOptions, vision
 
 from highnoon.config import PerceptionConfig
-from highnoon.contracts import FaceObservation, Frame, Perception, PoseObservation
+from highnoon.contracts import FaceObservation, Frame, HandObservation, Perception, PoseObservation
 from highnoon.core.capture import FrameSource
 
 
@@ -33,7 +36,10 @@ class Perceiver:
 
     def __init__(self, cfg: PerceptionConfig):
         self.cfg = cfg
-        for path in [cfg.pose_model_path] + ([cfg.face_model_path] if cfg.run_face else []):
+        paths = [cfg.pose_model_path]
+        paths += [cfg.face_model_path] if cfg.run_face else []
+        paths += [cfg.hand_model_path] if cfg.run_hands else []
+        for path in paths:
             if not path.exists():
                 raise FileNotFoundError(f"{path} missing - run: python tools/download_models.py")
 
@@ -60,6 +66,19 @@ class Perceiver:
                     min_tracking_confidence=cfg.min_tracking_confidence,
                 )
             )
+        self.hands = None
+        if cfg.run_hands:
+            landmarker = vision.HandLandmarker.create_from_options(
+                vision.HandLandmarkerOptions(
+                    base_options=BaseOptions(model_asset_path=str(cfg.hand_model_path)),
+                    running_mode=vision.RunningMode.VIDEO,
+                    num_hands=cfg.max_hands,
+                    min_hand_detection_confidence=cfg.min_detection_confidence,
+                    min_hand_presence_confidence=cfg.min_presence_confidence,
+                    min_tracking_confidence=cfg.min_tracking_confidence,
+                )
+            )
+            self.hands = HandWorker(landmarker, run_async=cfg.hands_async)
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="infer") if cfg.parallel else None
 
     def __call__(self, frame: Frame) -> Perception:
@@ -74,6 +93,9 @@ class Perceiver:
             result = fn(image, frame.timestamp_ms)
             timings[name] = (time.perf_counter() - t) * 1000
             return result
+
+        if self.hands is not None:
+            self.hands.submit(frame, image)  # async: returns immediately
 
         t_infer = time.perf_counter()
         if self._pool is not None and self.face is not None:
@@ -90,15 +112,77 @@ class Perceiver:
         poses = _convert_poses(pose_result, w, h)
         faces = _convert_faces(face_result, w, h) if face_result is not None else []
         mask = _merge_masks(pose_result) if self.cfg.segmentation else None
+        hands: list[HandObservation] = []
+        if self.hands is not None:
+            hands, hand_ms = self.hands.latest()
+            timings["hand"] = hand_ms
+            timings["hand_lag"] = float(frame.id - hands[0].frame_id) if hands else 0.0
         timings["postprocess"] = (time.perf_counter() - t_post) * 1000
-        return Perception(frame, poses, faces, mask, time.perf_counter(), timings)
+        return Perception(frame, poses, faces, mask, time.perf_counter(), timings, hands)
 
     def close(self) -> None:
         if self._pool is not None:
             self._pool.shutdown(wait=True)
+        if self.hands is not None:
+            self.hands.close()
         self.pose.close()
         if self.face is not None:
             self.face.close()
+
+
+class HandWorker:
+    """Hand landmarks on a separate thread, always on the newest submitted frame."""
+
+    def __init__(self, landmarker, run_async: bool = True):
+        self.landmarker = landmarker
+        self.run_async = run_async
+        self._pending: tuple[Frame, mp.Image] | None = None
+        self._result: list[HandObservation] = []
+        self._ms = 0.0
+        self._cond = threading.Condition()
+        self._running = True
+        self._thread = None
+        if run_async:
+            self._thread = threading.Thread(target=self._loop, name="hands", daemon=True)
+            self._thread.start()
+
+    def submit(self, frame: Frame, image: mp.Image) -> None:
+        if not self.run_async:
+            self._process(frame, image)
+            return
+        with self._cond:
+            self._pending = (frame, image)  # replaces an unprocessed older frame
+            self._cond.notify()
+
+    def latest(self) -> tuple[list[HandObservation], float]:
+        with self._cond:
+            return self._result, self._ms
+
+    def _loop(self) -> None:
+        while True:
+            with self._cond:
+                self._cond.wait_for(lambda: self._pending is not None or not self._running)
+                if not self._running:
+                    return
+                frame, image = self._pending
+                self._pending = None
+            self._process(frame, image)
+
+    def _process(self, frame: Frame, image: mp.Image) -> None:
+        t = time.perf_counter()
+        result = self.landmarker.detect_for_video(image, frame.timestamp_ms)
+        hands = _convert_hands(result, *frame.size, frame.id)
+        with self._cond:
+            self._result = hands
+            self._ms = (time.perf_counter() - t) * 1000
+
+    def close(self) -> None:
+        with self._cond:
+            self._running = False
+            self._cond.notify_all()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+        self.landmarker.close()
 
 
 class PerceptionWorker:
@@ -181,6 +265,31 @@ def _convert_faces(result, w: int, h: int) -> list[FaceObservation]:
         bbox = np.concatenate([pts.min(axis=0), pts.max(axis=0)])
         faces.append(FaceObservation(pts, bbox))
     return faces
+
+
+FINGERTIPS = [8, 12, 16, 20]  # index, middle, ring, pinky (the thumb folds sideways, so it is left out)
+WRIST, MIDDLE_MCP = 0, 9
+
+
+def hand_openness(world: np.ndarray) -> float:
+    """Fingertip reach relative to palm size, from 3D world landmarks (view-independent).
+
+    Scale-free, so it works for any hand size and distance: ~1.9 for an open hand, ~0.9 for a fist.
+    """
+    palm = float(np.linalg.norm(world[MIDDLE_MCP] - world[WRIST]))
+    if palm < 1e-6:
+        return 0.0
+    return float(np.linalg.norm(world[FINGERTIPS] - world[WRIST], axis=1).mean()) / palm
+
+
+def _convert_hands(result, w: int, h: int, frame_id: int) -> list[HandObservation]:
+    hands = []
+    scale = np.array([w, h], np.float32)
+    for i, landmarks in enumerate(result.hand_landmarks):
+        pts = np.array([(lm.x, lm.y) for lm in landmarks], np.float32) * scale
+        world = np.array([(lm.x, lm.y, lm.z) for lm in result.hand_world_landmarks[i]], np.float32)
+        hands.append(HandObservation(pts, world, hand_openness(world), frame_id))
+    return hands
 
 
 def _merge_masks(result) -> np.ndarray | None:

@@ -14,7 +14,7 @@ from highnoon.config import DisplayConfig
 from highnoon.contracts import Perception, Player
 from highnoon.core.profiler import Profiler
 from highnoon.game.game import Game
-from highnoon.render.game_view import draw_game
+from highnoon.render.game_view import draw_game, draw_signal_debug
 
 PLAYER_COLORS = {1: (60, 60, 230), 2: (230, 160, 40)}  # BGR: red, blue
 
@@ -44,6 +44,7 @@ class Renderer:
                 self._draw_player(image, p)
         draw_game(image, game, players, perception.frame.t_capture, PLAYER_COLORS)
         if self.cfg.show_debug:
+            draw_signal_debug(image, game, players, PLAYER_COLORS)
             self._draw_hud(image, profiler, len(perception.poses), len(perception.faces))
         return image
 
@@ -81,7 +82,7 @@ class Renderer:
     def _draw_hud(self, image: np.ndarray, profiler: Profiler, n_poses: int, n_faces: int) -> None:
         stats = profiler.stats()
         lines = [f"FPS {profiler.fps():4.1f}   poses {n_poses}  faces {n_faces}"]
-        for name in ("latency", "inference", "pose", "face", "render"):
+        for name in ("latency", "inference", "pose", "face", "hand", "render"):
             if name in stats:
                 mean, p95 = stats[name]
                 lines.append(f"{name:<10s}{mean:5.1f} ms  p95 {p95:5.1f}")

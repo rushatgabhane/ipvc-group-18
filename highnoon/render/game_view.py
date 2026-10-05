@@ -152,3 +152,32 @@ def _draw_hud(image: np.ndarray, game: Game, visible: set[int], colors: dict, t:
         _text_center(
             image, f"PLAYER {game.winner} WINS!", (w // 2, h // 2), 2.2, colors.get(game.winner, WHITE), 5
         )
+
+
+def draw_signal_debug(image: np.ndarray, game: Game, players: list[Player], colors: dict) -> None:
+    """Per-player readout of the values the action thresholds act on (for tuning live)."""
+    cfg = game.cfg
+    for p in players:
+        st = game.states.get(p.id)
+        if not p.visible or p.signals is None or st is None or p.smoothed is None:
+            continue
+        s, f = p.signals, st.frame
+        lines = [
+            f"arm {s.extension:4.2f}  elev {np.degrees(s.elevation):+4.0f} (aim -50..80)",
+            f"aim {'ON' if f.aiming else 'off'}  drop {f.duck_drop:+.2f} (duck > {cfg.duck_enter:.2f})",
+            f"arms down {'YES' if s.arms_down else 'no'}  ammo {st.ammo}",
+            "hand: not tracked"
+            if s.hand_openness is None
+            else f"hand {s.hand_openness:4.2f} {'FIST' if f.hand_closed else 'open'}"
+            f" (fist < {cfg.fist_closed:.2f}, open > {cfg.fist_open:.2f})",
+        ]
+        # Under the face, where it stays on screen even when the shoulders are out of frame.
+        anchor = p.face.bbox[[0, 3]] if p.face is not None else p.smoothed[0]
+        x = int(anchor[0])
+        y = int(anchor[1]) + 25
+        for i, text in enumerate(lines):
+            org = (min(max(5, x), image.shape[1] - 330), min(image.shape[0] - 160, y) + i * 20)
+            cv2.putText(image, text, org, cv2.FONT_HERSHEY_SIMPLEX, 0.5, BLACK, 4, cv2.LINE_AA)
+            cv2.putText(
+                image, text, org, cv2.FONT_HERSHEY_SIMPLEX, 0.5, colors.get(p.id, WHITE), 1, cv2.LINE_AA
+            )

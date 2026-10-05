@@ -19,6 +19,7 @@ from highnoon.config import TrackingConfig
 from highnoon.contracts import Perception, Player
 
 NOSE = 0
+POSE_WRISTS = (15, 16)
 _INF_COST = 1e6
 
 
@@ -49,6 +50,7 @@ class IdentityTracker:
             p.visible = False
             p.pose = None
             p.face = None
+            p.hands = {}
         for det_idx, slot in assigned.items():
             p = self.players[slot]
             if not self._active[slot]:
@@ -60,6 +62,7 @@ class IdentityTracker:
             self._last_center[slot] = centers[det_idx]
 
         self._assign_faces(perception)
+        self._assign_hands(perception)
         return self.players
 
     def _assign(self, centers: list[np.ndarray], width: int) -> dict[int, int]:
@@ -98,3 +101,19 @@ class IdentityTracker:
             size = max(face.bbox[2] - face.bbox[0], face.bbox[3] - face.bbox[1])
             if cost[r, c] <= size:
                 visible[c].face = face
+
+    def _assign_hands(self, perception: Perception) -> None:
+        """Attach each hand to the nearest pose wrist (hands may be 1-2 frames old)."""
+        slots = [(p, w) for p in self.players if p.visible for w in POSE_WRISTS]
+        if not slots or not perception.hands:
+            return
+        wrists = np.array([p.pose.keypoints[w] for p, w in slots])
+        hand_wrists = np.array([h.landmarks[0] for h in perception.hands])
+        cost = np.linalg.norm(hand_wrists[:, None, :] - wrists[None, :, :], axis=2)
+        rows, cols = linear_sum_assignment(cost)
+        for r, c in zip(rows, cols, strict=True):
+            player, wrist = slots[c]
+            shoulders = player.pose.keypoints[[11, 12]]
+            gate = max(60.0, 0.8 * float(np.linalg.norm(shoulders[0] - shoulders[1])))
+            if cost[r, c] <= gate:
+                player.hands[wrist] = perception.hands[r]

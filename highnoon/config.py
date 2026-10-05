@@ -28,10 +28,16 @@ class PerceptionConfig:
     # Measured: lite 25 ms vs full 33 ms per frame. Lite keeps us inside a 33 ms (30 fps) budget.
     pose_model: str = "pose_landmarker_lite"
     face_model: str = "face_landmarker"
+    hand_model: str = "hand_landmarker"
     max_players: int = 2
     # Segmentation mask comes from the pose model for ~0.3 ms extra, so T5 gets it nearly free.
     segmentation: bool = True
     run_face: bool = True
+    # Hands (for the fist trigger) cost ~15 ms per hand, so they run on their own thread and the
+    # pipeline uses the newest finished result instead of waiting (see vision/perception.py).
+    run_hands: bool = True
+    max_hands: int = 2  # one trigger hand per player; each extra hand costs another ~15 ms
+    hands_async: bool = True  # False = run inline (deterministic, for clip analysis)
     # Pose and face run on separate threads: measured 36.7 ms sequential -> 25.7 ms parallel.
     parallel: bool = True
     min_detection_confidence: float = 0.5
@@ -45,6 +51,10 @@ class PerceptionConfig:
     @property
     def face_model_path(self) -> Path:
         return MODELS_DIR / f"{self.face_model}.task"
+
+    @property
+    def hand_model_path(self) -> Path:
+        return MODELS_DIR / f"{self.hand_model}.task"
 
 
 @dataclass
@@ -67,7 +77,12 @@ class TrackingConfig:
 class GameConfig:
     """T4 rules and action thresholds. Distances are in torso lengths (scale-invariant)."""
 
-    # Fire: a quick upward "recoil" flick of the aiming arm.
+    # Fire trigger: "fist" = close the aiming hand (needs hand tracking), "flick" = recoil flick.
+    trigger: str = "fist"
+    fist_closed: float = 1.25  # hand openness below this = closed ...
+    fist_open: float = 1.55  # ... and above this = open again (hysteresis; must reopen between shots)
+    aim_lookback_s: float = 0.1  # shoot along the aim from this long before the trigger
+    # Flick trigger: a quick upward "recoil" flick of the aiming arm.
     flick_rise_deg: float = 20.0  # elevation gain that counts as a flick ...
     flick_window_s: float = 0.15  # ... within this time window
     armed_after_s: float = 0.3  # arm must aim steadily this long first (raising the arm is not a shot)
