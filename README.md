@@ -18,6 +18,34 @@ The only controller is computer vision on a single webcam.
 
 Requires **Python 3.12**. mediapipe has no wheels for 3.14 yet.
 
+### Windows PowerShell
+
+Install Python 3.12 from [python.org](https://www.python.org/downloads/) and select
+**Add python.exe to PATH** during installation. From the repository folder:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe tools\download_models.py
+```
+
+You can run the project without activating the environment. If you prefer activation:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+python tools\download_models.py
+```
+
+If PowerShell blocks `Activate.ps1`, run this once for your Windows user, then activate again:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+### macOS/Linux
+
 ```bash
 # with uv (recommended)
 uv venv --python 3.12 .venv
@@ -33,7 +61,17 @@ python3.12 -m venv .venv
 
 ## Run
 
-```bash
+### Windows PowerShell
+
+```powershell
+.\.venv\Scripts\python.exe -m highnoon                 # webcam 0, 1280x720
+.\.venv\Scripts\python.exe -m highnoon --source 1      # another camera
+.\.venv\Scripts\python.exe -m highnoon --help          # all options
+```
+
+### mac/linux
+
+bash
 .venv/bin/python -m highnoon                 # webcam 0, 1280x720
 .venv/bin/python -m highnoon --source 1      # another camera
 .venv/bin/python -m highnoon --help          # all options
@@ -157,3 +195,10 @@ fetches them from Google's MediaPipe model storage and checks their sha256.
 This foundation was scaffolded with Claude Code (Anthropic). The design choices and every
 number in `docs/PERFORMANCE.md` were measured on our hardware. The full AI and external-tools
 statement will be in the report appendix.
+
+
+### IDEAS
+
+1. Arcade mode.
+2. Powerups.
+3. Tweakable Parameters
