@@ -251,7 +251,14 @@ def test_camping_to_zero_hands_the_round_to_the_opponent():
 def test_player_leaving_keeps_the_duel_and_asks_them_back():
     game, t = start_duel()
     game.states[2].hp = 60
-    t = step(game, alone, int(20 / DT), t)
+    left_at = t
+
+    def p2_gone():
+        return [make_player(1, 300), Player(id=2, last_seen=left_at)]
+
+    t = step(game, p2_gone, int(3 / DT), t)
+    assert game.mode == "duel" and game.missing_players == []
+    t = step(game, p2_gone, int(3 / DT), t)
     assert game.mode == "duel" and game.missing_players == [2]
     step(game, duel, 2, t)
     assert game.mode == "duel" and game.missing_players == [] and game.states[2].hp == 60

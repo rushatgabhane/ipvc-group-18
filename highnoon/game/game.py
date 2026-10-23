@@ -96,7 +96,11 @@ class Game:
     def missing_players(self) -> list[int]:
         if self.mode != "duel":
             return []
-        return [player.id for player in self._players.values() if not player.visible]
+        return [
+            player.id
+            for player in self._players.values()
+            if not player.visible and self._t - player.last_seen > self.cfg.come_back_after_s
+        ]
 
     def countdown_left(self, t: float) -> float:
         return max(0.0, self.countdown_end_t - t) if self.mode == "countdown" else 0.0

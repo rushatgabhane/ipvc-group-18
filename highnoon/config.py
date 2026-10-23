@@ -73,6 +73,7 @@ class GameConfig:
     grenade_reach: float = 0.1
     round_end_s: float = 5.0
     countdown_s: float = 3.0
+    come_back_after_s: float = 5.0
     powerup_interval_s: float = 15.0
     powerup_fall_s: float = 5.0
     powerup_radius: float = 0.08
