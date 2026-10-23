@@ -94,7 +94,7 @@ def fire(game, t, aim=RIGHT, p2_y=STANDING, settle_frames=1):
 
 def test_shot_hits_standing_player_and_is_blocked_when_ducked():
     game, t = start_duel()
-    t = fire(game, t, settle_frames=12)
+    t = fire(game, t, settle_frames=20)
     assert game.states[2].hp == 100 - game.cfg.body_damage
     assert game.states[1].ammo == game.cfg.max_ammo - 1
 
@@ -157,7 +157,7 @@ def place_powerup(game, kind, t):
 def test_shooting_a_powerup_gives_it_to_the_shooter():
     game, t = start_duel()
     place_powerup(game, "rocket", t)
-    fire(game, t, aim=UP_RIGHT, settle_frames=12)
+    fire(game, t, aim=UP_RIGHT, settle_frames=20)
     assert game.powerup is None
     assert game.states[1].rockets == 1 and game.states[2].rockets == 0
     assert any(e.kind == "pickup" and e.player == 1 and e.detail == "rocket" for e in game.effects)
@@ -215,7 +215,7 @@ def test_countdown_starts_only_with_both_players_and_blocks_shooting():
     assert game.mode == "idle"
     t = step(game, duel, 1, t)
     assert game.mode == "countdown" and game.countdown_left(t) > 2.5
-    t = fire(game, t, settle_frames=12)
+    t = fire(game, t, settle_frames=20)
     assert game.states[2].hp == 100 and game.states[1].ammo == game.cfg.max_ammo
     step(game, duel, int(game.cfg.countdown_s / DT), t)
     assert game.mode == "duel"

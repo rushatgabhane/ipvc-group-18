@@ -64,7 +64,7 @@ class GameConfig:
     max_hp: int = 100
     body_damage: int = 10
     head_damage: int = 25
-    bullet_travel_s: float = 0.25
+    bullet_travel_s: float = 0.45
     round_end_s: float = 4.0
     countdown_s: float = 3.0
     player_grace_s: float = 1.0
