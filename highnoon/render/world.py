@@ -17,9 +17,8 @@ POWERUP_TRAIL = ((3, 0.46), (2, 0.64), (1, 0.82))
 ROCKET_FLAME = ((44, 22, (20, 70, 140)), (36, 13, (40, 150, 255)), (30, 7, (180, 240, 255)))
 FIREBALL = ((1.0, (20, 60, 200)), (0.75, (30, 140, 255)), (0.45, (170, 235, 255)))
 MUZZLE_RINGS = ((46, 0.25), (30, 0.5), (16, 1.0))
-AIM_DOTS = 3
-AIM_DOT_GAP = 22
-AIM_DOT_START = 18
+GUN_LENGTH = 120
+GUN_HAND_OFFSET = 20
 
 
 class WorldView:
@@ -39,8 +38,10 @@ class WorldView:
         self._draw_shockwaves(image, game, t, scale)
         self._draw_grenade_warnings(image, game, t, scale)
         for player_id, aim in game.aims.items():
+            color = self.colors.get(player_id, WHITE)
+            draw_gun(image, aim, color, scale)
             if aim.path is not None:
-                self._draw_reticle(image, aim, self.colors.get(player_id, WHITE), t, scale)
+                self._draw_reticle(image, aim, color, t, scale)
 
     def _draw_powerup(self, image, game: Game, t: float, scale: float) -> None:
         powerup = game.powerup
@@ -96,8 +97,6 @@ class WorldView:
         for player_id, aim in game.aims.items():
             if aim.path is not None:
                 draw_arc_preview(glow, aim, self.colors.get(player_id, WHITE), t, scale)
-            else:
-                draw_laser(glow, aim, self.colors.get(player_id, WHITE), t, scale)
         for bullet in game.bullets:
             draw_tracer(glow, bullet, self.colors.get(bullet.shooter, WHITE), t, scale)
         for rocket in game.rockets:
@@ -181,14 +180,13 @@ def draw_crosshair(
         cv2.line(image, start, end, color, thickness, cv2.LINE_AA)
 
 
-def draw_laser(glow, aim, color, t: float, scale: float) -> None:
-    halo, core = scaled_color(color, 0.35), scaled_color(color, 0.9)
-    steps = (AIM_DOT_START + AIM_DOT_GAP * np.arange(AIM_DOTS)) * scale
-    reach = float(np.linalg.norm(aim.end - aim.origin))
-    dots = aim.origin + np.outer(steps[steps < reach], unit(aim.end - aim.origin))
-    for dot in dots.astype(np.int32).tolist():
-        cv2.circle(glow, dot, max(3, int(5 * scale)), halo, -1, cv2.LINE_AA)
-        cv2.circle(glow, dot, max(2, int(2.5 * scale)), core, -1, cv2.LINE_AA)
+def draw_gun(image, aim, color, scale: float) -> None:
+    direction = unit(aim.end - aim.origin)
+    right, left = assets.revolver(tuple(color), int(GUN_LENGTH * scale))
+    sprite = right if direction[0] >= 0 else left
+    angle = math.degrees(math.atan2(float(direction[1]), float(direction[0])))
+    hand = aim.origin + direction * GUN_HAND_OFFSET * scale
+    blit_center(image, assets.rotated(sprite, -angle), hand[0], hand[1])
 
 
 def draw_arc_preview(glow, aim, color, t: float, scale: float) -> None:

@@ -3,11 +3,14 @@ from __future__ import annotations
 import io
 import math
 import wave
+from pathlib import Path
 
 import numpy as np
 from scipy.signal import lfilter
 
 RATE = 44100
+SOUND_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "sounds"
+RECORDED = {"shot": SOUND_DIR / "gunshot.wav"}
 VOLUME = 0.6
 
 
@@ -56,12 +59,6 @@ def sequence(*notes: tuple[np.ndarray, float]) -> np.ndarray:
         offset = int(start * RATE)
         out[offset : offset + note.size] += note
     return out
-
-
-def gun_shot() -> np.ndarray:
-    return mix(
-        (noise(0.35, 0.04, 0.55, 1), 0.9), (tone(85, 0.3, 0.07), 0.8), (noise(0.02, 0.004, 0.0, 2), 0.5)
-    )
 
 
 def rocket_launch() -> np.ndarray:
@@ -129,7 +126,6 @@ def fanfare() -> np.ndarray:
 
 
 SOUNDS = {
-    "shot": gun_shot,
     "rocket_launch": rocket_launch,
     "grenade_throw": grenade_throw,
     "hit": hit,
@@ -175,6 +171,9 @@ class SoundBoard:
             name: pyglet.media.load(f"{name}.wav", file=wav_bytes(make()), streaming=False)
             for name, make in SOUNDS.items()
         }
+        self._sources.update(
+            {name: pyglet.media.load(str(path), streaming=False) for name, path in RECORDED.items()}
+        )
         self._seen: set[int] = set()
         self._countdown_number: int | None = None
         self._mode: str | None = None

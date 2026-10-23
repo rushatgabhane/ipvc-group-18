@@ -170,6 +170,7 @@ class Game:
         return next((p for p in self._players.values() if p.id != player_id and p.id in self._hitboxes), None)
 
     def _fire(self, shooter: int, state: PlayerState, shot: Shot, t: float) -> None:
+        shot = Shot(self.muzzle(shot.origin, shot.direction), shot.direction)
         opponent = self._opponent_of(shooter)
         weapon = ""
         if state.grenades > 0 and opponent is not None:
@@ -305,6 +306,9 @@ class Game:
             self.round_over_t = t
             self.scores[shooter] = self.scores.get(shooter, 0) + 1
 
+    def muzzle(self, hand: np.ndarray, direction: np.ndarray) -> np.ndarray:
+        return (hand + direction * self.cfg.gun_reach * self.height).astype(np.float32)
+
     def _cast(self, shooter: int, origin: np.ndarray, direction: np.ndarray):
         reach = ray_exit_distance(origin, direction, self.width, self.height)
         hit = self._first_hit(shooter, origin[None, :], (origin + direction * reach)[None, :])
@@ -359,7 +363,8 @@ class Game:
                 continue
             origin, direction = player.signals.aim_origin, player.signals.aim_dir
             if state.rockets > 0:
-                path, (kind, target) = self._predict_arc(player.id, origin, direction)
+                muzzle = self.muzzle(origin, direction)
+                path, (kind, target) = self._predict_arc(player.id, muzzle, direction)
                 lands_on_player = kind in ("head", "body", "powerup") or (
                     kind == "cover" and target is not None
                 )

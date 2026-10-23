@@ -9,7 +9,11 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-FONT_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "fonts"
+ASSET_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
+FONT_DIR = ASSET_DIR / "fonts"
+REVOLVER_PATH = ASSET_DIR / "sprites" / "revolver.png"
+REVOLVER_GRIP = (10, 3)
+REVOLVER_OUTLINE_PX = 2
 TITLE_FONT = FONT_DIR / "Rye-Regular.ttf"
 HUD_FONT = FONT_DIR / "BebasNeue-Regular.ttf"
 SUPERSAMPLE = 4
@@ -65,6 +69,32 @@ def scaled(sprite: Sprite, scale: float) -> Sprite:
         return sprite
     size = (max(1, int(sprite.width * scale)), max(1, int(sprite.height * scale)))
     return Sprite.from_bgra(cv2.resize(sprite.bgra, size, interpolation=cv2.INTER_LINEAR))
+
+
+@lru_cache(maxsize=8)
+def revolver(color: tuple[int, int, int], length: int) -> tuple[Sprite, Sprite]:
+    art = cv2.imread(str(REVOLVER_PATH), cv2.IMREAD_UNCHANGED)
+    zoom = length / art.shape[1]
+    gun = cv2.resize(art, None, fx=zoom, fy=zoom, interpolation=cv2.INTER_NEAREST)
+    gun = cv2.copyMakeBorder(gun, *[REVOLVER_OUTLINE_PX] * 4, cv2.BORDER_CONSTANT, value=(0, 0, 0, 0))
+    grip = np.array(REVOLVER_GRIP, np.float32) * zoom + REVOLVER_OUTLINE_PX
+    corners = np.array([[0, 0], [gun.shape[1], 0], [0, gun.shape[0]], [gun.shape[1], gun.shape[0]]])
+    half = int(np.ceil(np.linalg.norm(corners - grip, axis=1).max()))
+    canvas = np.zeros((2 * half, 2 * half, 4), np.uint8)
+    x0, y0 = half - int(round(grip[0])), half - int(round(grip[1]))
+    canvas[y0 : y0 + gun.shape[0], x0 : x0 + gun.shape[1]] = gun
+    right = Sprite.from_bgra(outlined(canvas, color))
+    return right, Sprite.from_bgra(np.ascontiguousarray(right.bgra[::-1]))
+
+
+def outlined(bgra: np.ndarray, color: tuple[int, int, int]) -> np.ndarray:
+    size = 2 * REVOLVER_OUTLINE_PX + 1
+    ring = cv2.dilate(bgra[:, :, 3], cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
+    weight = bgra[:, :, 3:].astype(np.float32) / 255
+    out = np.empty_like(bgra)
+    out[:, :, :3] = (bgra[:, :, :3] * weight + np.array(color, np.float32) * (1 - weight)).astype(np.uint8)
+    out[:, :, 3] = ring
+    return out
 
 
 def rotated(sprite: Sprite, angle_deg: float) -> Sprite:

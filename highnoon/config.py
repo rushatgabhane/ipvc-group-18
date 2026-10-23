@@ -67,6 +67,7 @@ class GameConfig:
     body_damage: int = 10
     head_damage: int = 25
     bullet_travel_s: float = 0.45
+    gun_reach: float = 0.16
     round_end_s: float = 4.0
     countdown_s: float = 3.0
     powerup_interval_s: float = 15.0

@@ -240,9 +240,9 @@ class Hud:
         empty = [p.id for p in players if needs_reload(game, p.id) and not game.states[p.id].frame.ducked]
         pulse = 1.0 + 0.12 * abs(math.sin(t * 8))
         alpha = 1.0 if int(t * 4) % 2 == 0 else 0.55
-        for row, player_id in enumerate(empty):
+        for player_id in empty:
             sprite = assets.scaled(self._reload_warning_sprite(player_id, scale), pulse)
-            blit_center(image, sprite, width / 2, height * 0.5 + row * 60 * scale, alpha)
+            blit_center(image, sprite, width * player_side(player_id), height * 0.5, alpha)
 
     def _draw_float_texts(self, image, t: float, scale: float) -> None:
         for text in self.fx.texts:
@@ -375,6 +375,10 @@ def zoom_in_out(age: float, duration: float) -> tuple[float, float]:
         return zoom_in(age)
     shrink = 1 - max(0.0, left) / effects.ANNOUNCE_OUT_S
     return 1.0 + (SHRINK_TO - 1.0) * shrink**2, 1 - shrink
+
+
+def player_side(player_id: int) -> float:
+    return 0.25 if player_id == 1 else 0.75
 
 
 def needs_reload(game: Game, player_id: int) -> bool:

@@ -87,7 +87,7 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 
 | Action | Movement |
 |---|---|
-| **Aim** | Point with your arm (straight, or just the forearm when sitting close). Three dots in front of your hand show the angle |
+| **Aim** | Point with your arm (straight, or just the forearm when sitting close). A revolver in your colour follows your hand and shows the angle |
 | **Shoot** | Aim with an **open hand**, then **close it into a fist**. Hold the hand open again briefly before the next shot (at most one shot every 0.6 s). Shots fired quickly after each other kick: each one adds random spread, which recovers within about 1 s |
 | **Duck** | Get your head below the top of the wall (the bottom 25% of the screen). You are safe there but cannot shoot |
 | **Reload** | Stay ducked for 0.8 s to refill the magazine (3 bullets). A bar under your name shows the progress |
@@ -194,7 +194,7 @@ highnoon/
     identity.py        persistent player ids, face-to-player assignment (T3)
   render/
     renderer.py        background compositing, wall, layer order, debug overlay (T5)
-    world.py           aim dots, rocket arc preview, tracers, powerups, rockets, grenades, explosions
+    world.py           revolver, rocket arc preview, tracers, powerups, rockets, grenades, explosions
     hud.py             name tags, HUD cards, banner, winner screen, announcements
     palette.py         shared colours
     assets.py          sprites (cached blend weights), procedural scenery, cached TrueType text
@@ -221,6 +221,8 @@ Pinned in `requirements.txt`: mediapipe 0.10.35 (1.0.x crashes on macOS), opencv
 5.0.0 (mediapipe needs the contrib build), numpy, scipy, pyglet (OpenGL window, no bundled SDL),
 pillow (TrueType HUD text). Model weights are not in the repo. `tools/download_models.py`
 fetches them from Google's MediaPipe model storage and checks their sha256.
+
+Third-party art and sounds (CC0 / OFL) are listed in `assets/CREDITS.md`.
 
 ## AI usage
 
