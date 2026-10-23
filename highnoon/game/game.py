@@ -21,7 +21,7 @@ from highnoon.game.geometry import ray_exit_distance, rect_polygon, segment_circ
 
 NOSE = 0
 TORSO_CORNERS = [11, 12, 24, 23]
-POWERUP_KINDS = ("heal", "rocket", "grenade")
+POWERUP_KINDS = ("rocket", "grenade")
 EFFECT_LIFETIME_S = 0.8
 HEAD_RADIUS_PER_FACE = 0.6
 HEAD_RADIUS_PER_TORSO = 0.35
@@ -49,6 +49,8 @@ class Game:
         self.round_over_t: float | None = None
         self.scores: dict[int, int] = {}
         self._next_powerup_t: float | None = None
+        self.countdown_end_t: float | None = None
+        self._players_missing_since: float | None = None
         self._rng = np.random.default_rng(seed)
         self._players: dict[int, Player] = {}
         self._hitboxes: dict[int, Hitbox] = {}
@@ -61,9 +63,10 @@ class Game:
         self._hitboxes = {p.id: hitbox(p) for p in players if p.visible and p.smoothed is not None}
         self._wall = self.wall
         self._create_states(players, reassigned)
-        self.mode = "duel" if sum(p.visible for p in players) >= 2 else "idle"
+        self._update_mode(sum(p.visible for p in players) >= 2, t)
         if self.round_over_t is not None and t - self.round_over_t >= self.cfg.round_end_s:
             self.reset_round()
+            self.mode, self.countdown_end_t = "countdown", t + self.cfg.countdown_s
         self._update_powerup(t)
         for player in players:
             self._update_player(player, t)
@@ -83,7 +86,28 @@ class Game:
 
     @property
     def round_live(self) -> bool:
-        return self.round_over_t is None
+        return self.mode == "duel" and self.round_over_t is None
+
+    def countdown_left(self, t: float) -> float:
+        return max(0.0, self.countdown_end_t - t) if self.mode == "countdown" else 0.0
+
+    def _update_mode(self, both_in_view: bool, t: float) -> None:
+        if both_in_view:
+            self._players_missing_since = None
+        elif self._players_missing_since is None:
+            self._players_missing_since = t
+        players_gone = self._players_missing_since is not None and (
+            t - self._players_missing_since > self.cfg.player_grace_s
+        )
+        if self.mode == "idle" and both_in_view:
+            self.mode, self.countdown_end_t = "countdown", t + self.cfg.countdown_s
+        elif self.mode == "countdown" and players_gone:
+            self.mode = "idle"
+        elif self.mode == "countdown" and t >= self.countdown_end_t:
+            self.reset_round()
+            self.mode = "duel"
+        elif self.mode == "duel" and players_gone:
+            self.mode = "idle"
 
     def blast_radius(self, grenade: bool = False) -> float:
         return self.cfg.rocket_blast_radius * self.height * (GRENADE_BLAST_SCALE if grenade else 1.0)
@@ -317,7 +341,7 @@ class Game:
     def _update_powerup(self, t: float) -> None:
         if self.powerup is not None and t >= self.powerup.t_end:
             self.powerup = None
-        if self.mode != "duel" or not self.round_live:
+        if not self.round_live:
             return
         if self._next_powerup_t is None:
             self._next_powerup_t = t + self.cfg.powerup_interval_s
@@ -338,9 +362,7 @@ class Game:
     def _collect(self, player_id: int, powerup: Powerup, pos: np.ndarray, t: float) -> None:
         self.powerup = None
         state = self.states[player_id]
-        if powerup.kind == "heal":
-            state.hp = self.cfg.max_hp
-        elif powerup.kind == "rocket":
+        if powerup.kind == "rocket":
             state.rockets = 1
         else:
             state.grenades = 1

@@ -64,11 +64,26 @@ def duel(aim=RIGHT, p2_y=STANDING, hand=OPEN):
     return [make_player(1, 300, aim_dir=aim, hand=hand), make_player(2, 900, shoulder_y=p2_y)]
 
 
+def p1_ducked():
+    return [make_player(1, 300, shoulder_y=DUCKED), make_player(2, 900)]
+
+
+def alone():
+    return [make_player(1, 300), Player(id=2)]
+
+
 def step(game, players_fn, frames, t):
     for _ in range(frames):
         game.update(players_fn(), t, set())
         t += DT
     return t
+
+
+def start_duel(players_fn=duel):
+    game = Game(GameConfig(), (1280, 720))
+    t = step(game, players_fn, int(game.cfg.countdown_s / DT) + 2, 0.0)
+    assert game.mode == "duel"
+    return game, t
 
 
 def fire(game, t, aim=RIGHT, p2_y=STANDING, settle_frames=1):
@@ -78,8 +93,8 @@ def fire(game, t, aim=RIGHT, p2_y=STANDING, settle_frames=1):
 
 
 def test_shot_hits_standing_player_and_is_blocked_when_ducked():
-    game = Game(GameConfig(), (1280, 720))
-    t = fire(game, 0.0, settle_frames=12)
+    game, t = start_duel()
+    t = fire(game, t, settle_frames=12)
     assert game.states[2].hp == 100 - game.cfg.body_damage
     assert game.states[1].ammo == game.cfg.max_ammo - 1
 
@@ -99,11 +114,12 @@ def test_wall_is_static_and_blocks_low_shots():
 
 
 def test_ducking_reloads():
-    game = Game(GameConfig(), (1280, 720))
+    game, t = start_duel()
     assert game.cfg.max_ammo == 3
-    t = step(game, duel, 2, 0.0)
     game.states[1].ammo = 0
-    step(game, lambda: [make_player(1, 300, shoulder_y=DUCKED), make_player(2, 900)], 2, t)
+    t = step(game, p1_ducked, 5, t)
+    assert game.states[1].ammo == 0
+    step(game, p1_ducked, int(game.cfg.reload_s / DT) + 1, t)
     assert game.states[1].ammo == game.cfg.max_ammo
 
 
@@ -114,9 +130,9 @@ def test_one_player_is_not_a_game():
 
 
 def test_powerup_spawns_every_interval_in_duel_and_flies_an_arc():
-    cfg = GameConfig()
-    game = Game(cfg, (1280, 720))
-    t = step(game, duel, int((cfg.powerup_interval_s - 1) / DT), 0.0)
+    game, t = start_duel()
+    cfg = game.cfg
+    t = step(game, duel, int((cfg.powerup_interval_s - 1) / DT), t)
     assert game.powerup is None
     step(game, duel, int(2 / DT), t)
     powerup = game.powerup
@@ -128,7 +144,7 @@ def test_powerup_spawns_every_interval_in_duel_and_flies_an_arc():
 
 def test_powerups_only_in_duel():
     game = Game(GameConfig(), (1280, 720))
-    step(game, lambda: [make_player(1, 300), Player(id=2)], int(40 / DT), 0.0)
+    step(game, alone, int(40 / DT), 0.0)
     assert game.powerup is None
 
 
@@ -139,26 +155,16 @@ def place_powerup(game, kind, t):
 
 
 def test_shooting_a_powerup_gives_it_to_the_shooter():
-    game = Game(GameConfig(), (1280, 720))
-    place_powerup(game, "rocket", 0.0)
-    fire(game, 0.0, aim=UP_RIGHT, settle_frames=12)
+    game, t = start_duel()
+    place_powerup(game, "rocket", t)
+    fire(game, t, aim=UP_RIGHT, settle_frames=12)
     assert game.powerup is None
     assert game.states[1].rockets == 1 and game.states[2].rockets == 0
     assert any(e.kind == "pickup" and e.player == 1 and e.detail == "rocket" for e in game.effects)
 
 
-def test_heal_restores_full_hp():
-    game = Game(GameConfig(), (1280, 720))
-    t = step(game, duel, 1, 0.0)
-    game.states[1].hp = 10
-    place_powerup(game, "heal", t)
-    fire(game, t, aim=UP_RIGHT, settle_frames=12)
-    assert game.states[1].hp == game.cfg.max_hp
-
-
 def test_rocket_flies_an_arc_and_uses_no_ammo():
-    game = Game(GameConfig(), (1280, 720))
-    t = step(game, duel, 1, 0.0)
+    game, t = start_duel()
     game.states[1].rockets = 1
     t = step(game, duel, 1, t)
     path = game.aims[1].path
@@ -175,8 +181,7 @@ def test_rocket_flies_an_arc_and_uses_no_ammo():
 
 
 def test_rocket_blast_reaches_a_ducked_player():
-    game = Game(GameConfig(), (1280, 720))
-    t = step(game, lambda: duel(DOWN_RIGHT, DUCKED), 1, 0.0)
+    game, t = start_duel(lambda: duel(DOWN_RIGHT, DUCKED))
     game.states[1].rockets = 1
     fire(game, t, aim=DOWN_RIGHT, p2_y=DUCKED, settle_frames=40)
     assert game.states[2].frame.ducked
@@ -184,8 +189,7 @@ def test_rocket_blast_reaches_a_ducked_player():
 
 
 def throw_grenade(p2_y: float) -> Game:
-    game = Game(GameConfig(), (1280, 720))
-    t = step(game, lambda: duel(UP_RIGHT, p2_y), 1, 0.0)
+    game, t = start_duel(lambda: duel(UP_RIGHT, p2_y))
     game.states[1].grenades = 1
     t = fire(game, t, aim=UP_RIGHT, p2_y=p2_y, settle_frames=0)
     assert len(game.grenades) == 1 and game.states[1].ammo == game.cfg.max_ammo
@@ -203,3 +207,28 @@ def test_grenade_spares_a_ducked_player():
     game = throw_grenade(DUCKED)
     assert game.states[2].hp == 100 and game.winner is None
     assert any(e.kind == "safe" for e in game.effects)
+
+
+def test_countdown_starts_only_with_both_players_and_blocks_shooting():
+    game = Game(GameConfig(), (1280, 720))
+    t = step(game, alone, 10, 0.0)
+    assert game.mode == "idle"
+    t = step(game, duel, 1, t)
+    assert game.mode == "countdown" and game.countdown_left(t) > 2.5
+    t = fire(game, t, settle_frames=12)
+    assert game.states[2].hp == 100 and game.states[1].ammo == game.cfg.max_ammo
+    step(game, duel, int(game.cfg.countdown_s / DT), t)
+    assert game.mode == "duel"
+
+
+def test_short_detection_loss_does_not_cancel_the_duel():
+    game, t = start_duel()
+    t = step(game, alone, 5, t)
+    assert game.mode == "duel"
+    step(game, alone, int(game.cfg.player_grace_s / DT) + 2, t)
+    assert game.mode == "idle"
+
+
+def test_three_headshots_do_not_kill():
+    game, _ = start_duel()
+    assert 3 * game.cfg.head_damage < game.cfg.max_hp

@@ -42,8 +42,8 @@ def test_fist_fires_once_per_close():
 
 
 def test_fist_needs_open_hand_first_and_steady_aim():
-    frames = run(PlayerActions(CFG), [sig(hand=FIST)] * 15 + [sig()] * 3 + [sig(hand=FIST)])
-    assert shot_frames(frames) == [18]
+    frames = run(PlayerActions(CFG), [sig(hand=FIST)] * 15 + [sig()] * 6 + [sig(hand=FIST)])
+    assert shot_frames(frames) == [21]
     frames = run(PlayerActions(CFG), [sig(aim=False)] * 5 + [sig()] * 3 + [sig(hand=FIST)])
     assert shot_frames(frames) == []
 
@@ -82,7 +82,23 @@ def test_duck_is_absolute_not_relative_to_standing_height():
     assert not any(f.ducked for f in run(PlayerActions(CFG), [sig(head_y=520)] * 90))
 
 
-def test_reload_once_per_duck():
-    sequence = [sig()] * 5 + [sig(head_y=600)] * 20 + [sig()] * 5 + [sig(head_y=600)] * 5
-    reloads = [i for i, f in enumerate(run(PlayerActions(CFG), sequence)) if f.reload]
-    assert reloads == [5, 30]
+def test_reload_needs_staying_ducked_and_fires_once_per_duck():
+    hold = int(CFG.reload_s / DT)
+    sequence = [sig()] * 5 + [sig(head_y=600)] * (hold + 10) + [sig()] * 5 + [sig(head_y=600)] * (hold // 2)
+    frames = run(PlayerActions(CFG), sequence)
+    reloads = [i for i, f in enumerate(frames) if f.reload]
+    assert len(reloads) == 1 and abs(reloads[0] - (5 + hold)) <= 1
+    assert 0.4 < frames[-1].reload_progress < 0.6
+
+
+def test_rapid_fist_spam_is_blocked():
+    spam = [sig(hand=FIST), sig(), sig(), sig(hand=FIST), sig()] * 6
+    frames = run(PlayerActions(CFG), [sig()] * 15 + spam)
+    fired = shot_frames(frames)
+    assert fired[0] == 15
+    assert all(b - a >= CFG.fire_cooldown_s / DT for a, b in zip(fired, fired[1:], strict=False))
+
+
+def test_hand_must_stay_open_before_next_shot():
+    blink = [sig()] * 15 + [sig(hand=FIST)] * 20 + [sig()] * 2 + [sig(hand=FIST)]
+    assert shot_frames(run(PlayerActions(CFG), blink)) == [15]

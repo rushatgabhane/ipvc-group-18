@@ -52,7 +52,6 @@ class Renderer:
                     draw_skeleton(image, player)
         self._draw_wall(image)
 
-        self.hud.announce_changes(game, t)
         self.fx.update(t, game.effects)
         self.world.draw(image, game, t, dt)
         self.hud.draw(image, game, players, t, dt)

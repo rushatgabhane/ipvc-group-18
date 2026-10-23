@@ -88,19 +88,19 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 | Action | Movement |
 |---|---|
 | **Aim** | Point with your arm (straight, or just the forearm when sitting close). A laser sight follows it, and the dot turns red on a target |
-| **Shoot** | Aim with an **open hand**, then **close it into a fist**. Open it again before the next shot |
+| **Shoot** | Aim with an **open hand**, then **close it into a fist**. Hold the hand open again briefly before the next shot (at most one shot every 0.6 s) |
 | **Duck** | Get your head below the top of the wall (the bottom 25% of the screen). You are safe there but cannot shoot |
-| **Reload** | Duck. Every duck refills the magazine (3 bullets) |
+| **Reload** | Stay ducked for 0.8 s to refill the magazine (3 bullets). A bar under your name shows the progress |
 
-- **The game needs two players in view.** With fewer, it waits.
-- **Duel.** A body hit costs 15 HP and a headshot 35. First to 0 loses the round.
+- **The game needs two players in view.** With fewer, it waits. When both are in view it counts
+  down 3-2-1, and every new round starts with the same countdown. Nobody can shoot during it.
+- **Duel.** A body hit costs 10 HP and a headshot 25 (4 headshots or 10 body hits to win). First to 0 loses the round.
   Bullets take 0.25 s to arrive, so you can duck when you see your opponent fire.
 - **Powerups (duel only).** Every 30 s a powerup is tossed up from below the screen, flies in an
   arc and falls back out. Whoever shoots it first gets it (lead your shot: it moves):
 
   | Powerup | Effect |
   |---|---|
-  | **FULL HP** (red cross) | HP back to 100 |
   | **ROCKET LAUNCHER** (orange) | Your next shot is a rocket on a ballistic arc (a dotted preview shows where it lands). It explodes on impact, and the blast reaches over the wall: 50 damage at the centre, 20 at the edge |
   | **GRENADE** (green) | Your next shot lobs a grenade at your opponent, wherever they move. If they are not ducked when it lands 1.4 s later, they die |
 

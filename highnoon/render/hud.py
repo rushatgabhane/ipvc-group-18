@@ -18,7 +18,15 @@ HP_EASE_PER_S = 6.0
 HP_TRAIL_PER_S = 40.0
 HIT_FLASH_S = 0.25
 DUEL_HINT = "CLOSE YOUR HAND TO SHOOT  |  DUCK TO RELOAD  |  SHOOT POWERUPS  |  FIRST TO ZERO LOSES"
-BANNERS = {"idle": ("HIGH NOON", "TWO PLAYERS: STEP INTO VIEW"), "duel": ("DUEL", DUEL_HINT)}
+BANNERS = {
+    "idle": ("HIGH NOON", "TWO PLAYERS: STEP INTO VIEW"),
+    "countdown": ("GET READY", "STAY IN VIEW"),
+    "duel": ("DUEL", DUEL_HINT),
+}
+RELOAD_WARNING = "DUCK TO RELOAD!"
+RELOAD_WARNING_SIZE = 40
+COUNTDOWN_SIZE = 220
+COUNTDOWN_COLOR = GOLD
 
 
 class Hud:
@@ -29,14 +37,10 @@ class Hud:
         self._tag_pos: dict[int, np.ndarray] = {}
         self._hp_shown: dict[int, float] = {}
         self._hp_trail: dict[int, float] = {}
-        self._mode: str | None = None
-        self._winner: int | None = None
-        self._round = 1
 
     def prewarm(self, height: int) -> None:
         scale = height / 720.0
         announcements = [effects.HEADSHOT, effects.BOOM, effects.GRENADE_BOOM, effects.GRENADE_WARNING]
-        announcements += [("DRAW!", GOLD, 96)] + [(f"ROUND {n}", GOLD, 96) for n in range(2, 6)]
         for player_id in self.colors:
             announcements += [effects.pickup_announcement(player_id, kind) for kind in assets.POWERUP_LABELS]
             self._winner_name(player_id, scale)
@@ -44,6 +48,12 @@ class Hud:
             self._announcement_sprite(text, size, color, scale)
         for label, color in (("DUCK!", RED), ("SAFE", SAFE_GREEN)):
             self.text.get(label, int(46 * scale), color, TITLE_FONT, stroke=3)
+        self._reload_warning_sprite(scale)
+        self.text.get("RELOADING", int(26 * scale), GOLD, HUD_FONT, stroke=2)
+        for mode in BANNERS:
+            self._banner_sprites(mode, scale)
+        for number in range(1, 4):
+            self._countdown_sprite(number, scale)
         for seconds_left in range(5):
             self._round_over_texts(seconds_left, scale)
 
@@ -57,33 +67,46 @@ class Hud:
             text, int(size * scale), color, TITLE_FONT, stroke=4, stroke_color=(20, 25, 40), shadow=5
         )
 
+    def _banner_sprites(self, mode: str, scale: float):
+        title, hint = BANNERS[mode]
+        title_sprite = self.text.get(
+            title, int(30 * scale), GOLD, TITLE_FONT, stroke=2, stroke_color=(20, 30, 50)
+        )
+        return title_sprite, self.text.get(hint, int(19 * scale), CREAM, HUD_FONT)
+
+    def _countdown_sprite(self, number: int, scale: float):
+        return self._announcement_sprite(str(number), COUNTDOWN_SIZE, COUNTDOWN_COLOR, scale)
+
     def _winner_name(self, player_id: int, scale: float):
         color = self.colors.get(player_id, WHITE)
         return self.text.get(f"PLAYER {player_id}", int(110 * scale), color, TITLE_FONT, stroke=4, shadow=6)
-
-    def announce_changes(self, game: Game, t: float) -> None:
-        if game.mode != self._mode:
-            if game.mode == "duel":
-                self.fx.announce("DRAW!", t, GOLD)
-            self._mode = game.mode
-        if self._winner is not None and game.winner is None:
-            self._round += 1
-            self.fx.announce(f"ROUND {self._round}", t, GOLD)
-        self._winner = game.winner
 
     def draw(self, image: np.ndarray, game: Game, players: list[Player], t: float, dt: float) -> None:
         scale = image.shape[0] / 720.0
         visible = [p for p in players if p.visible and p.id in game.states]
         for player in visible:
             self._ease_hp(player.id, game.states[player.id].hp, dt)
-            self._draw_name_tag(image, game, player, scale)
+            self._draw_name_tag(image, game, player, t, scale)
         self._draw_float_texts(image, t, scale)
         for player in visible:
             self._draw_card(image, game, player, t, scale)
         self._draw_banner(image, game, scale)
         if game.winner is not None:
             self._draw_winner(image, game, t, scale)
+        if game.mode == "countdown":
+            self._draw_countdown(image, game.countdown_left(t), scale)
         self._draw_announcements(image, t, scale)
+
+    def _draw_countdown(self, image, seconds_left: float, scale: float) -> None:
+        if seconds_left <= 0:
+            return
+        number = math.ceil(seconds_left)
+        into_second = number - seconds_left
+        pop = 1.0 + 0.5 * max(0.0, 1 - into_second * 4)
+        alpha = 1.0 if into_second < 0.75 else max(0.0, 1 - (into_second - 0.75) / 0.25)
+        height, width = image.shape[:2]
+        sprite = assets.scaled(self._countdown_sprite(number, scale), pop)
+        blit_center(image, sprite, width / 2, height * 0.42, alpha)
 
     def _ease_hp(self, player_id: int, hp: int, dt: float) -> None:
         shown = self._hp_shown.get(player_id, float(hp))
@@ -102,7 +125,7 @@ class Hud:
             return np.array([nose[0], nose[1] - 0.6 * torso], np.float32)
         return None
 
-    def _draw_name_tag(self, image, game: Game, player: Player, scale: float) -> None:
+    def _draw_name_tag(self, image, game: Game, player: Player, t: float, scale: float) -> None:
         target = self._tag_anchor(player, scale)
         if target is None:
             return
@@ -132,6 +155,31 @@ class Hud:
         if badges:
             badge = self.text.get("  ".join(badges), int(22 * scale), CREAM, HUD_FONT, stroke=2)
             blit_center(image, badge, cx, bar_y + bar_h + 16 * scale)
+        below_tag = bar_y + bar_h + 52 * scale
+        state = game.states[player.id]
+        if state.frame.ducked and state.ammo < game.cfg.max_ammo and game.mode == "duel":
+            self._draw_reload_bar(image, cx, below_tag, state.frame.reload_progress, scale)
+        elif needs_reload(game, player.id):
+            self._draw_reload_warning(image, cx, below_tag, t, scale)
+
+    def _draw_reload_bar(self, image, x: float, y: float, progress: float, scale: float) -> None:
+        label = self.text.get("RELOADING", int(26 * scale), GOLD, HUD_FONT, stroke=2)
+        blit_center(image, label, x, y - 12 * scale)
+        bar_w, bar_h = int(120 * scale), max(6, int(10 * scale))
+        left, top = int(x - bar_w / 2), int(y + 6 * scale)
+        rounded_rect(image, left - 2, top - 2, left + bar_w + 2, top + bar_h + 2, bar_h, BLACK)
+        filled = max(bar_h, int(bar_w * progress))
+        rounded_rect(image, left, top, left + filled, top + bar_h, bar_h // 2, GOLD)
+
+    def _reload_warning_sprite(self, scale: float):
+        return self.text.get(
+            RELOAD_WARNING, int(RELOAD_WARNING_SIZE * scale), RED, TITLE_FONT, stroke=3, shadow=3
+        )
+
+    def _draw_reload_warning(self, image, x: float, y: float, t: float, scale: float) -> None:
+        pulse = 1.0 + 0.12 * abs(math.sin(t * 8))
+        alpha = 1.0 if int(t * 4) % 2 == 0 else 0.55
+        blit_center(image, assets.scaled(self._reload_warning_sprite(scale), pulse), x, y, alpha)
 
     def _draw_float_texts(self, image, t: float, scale: float) -> None:
         for text in self.fx.texts:
@@ -204,11 +252,7 @@ class Hud:
 
     def _draw_banner(self, image, game: Game, scale: float) -> None:
         width = image.shape[1]
-        title, hint = BANNERS[game.mode]
-        title_sprite = self.text.get(
-            title, int(30 * scale), GOLD, TITLE_FONT, stroke=2, stroke_color=(20, 30, 50)
-        )
-        hint_sprite = self.text.get(hint, int(19 * scale), CREAM, HUD_FONT)
+        title_sprite, hint_sprite = self._banner_sprites(game.mode, scale)
         panel_w = max(title_sprite.width, hint_sprite.width) + int(40 * scale)
         panel_h = title_sprite.height + hint_sprite.height + int(10 * scale)
         x0, y0 = width // 2 - panel_w // 2, int(10 * scale)
@@ -238,6 +282,11 @@ class Hud:
                 announcement.text, announcement.size, announcement.color, scale
             )
             blit_center(image, assets.scaled(sprite, pop), width / 2, height * 0.36, alpha)
+
+
+def needs_reload(game: Game, player_id: int) -> bool:
+    state = game.states[player_id]
+    return game.mode == "duel" and state.ammo == 0 and not state.rockets and not state.grenades
 
 
 def player_badges(game: Game, player_id: int) -> list[str]:

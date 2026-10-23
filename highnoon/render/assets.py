@@ -15,8 +15,8 @@ HUD_FONT = FONT_DIR / "BebasNeue-Regular.ttf"
 SUPERSAMPLE = 4
 ROTATION_STEP_DEG = 4
 
-POWERUP_COLORS = {"heal": (70, 70, 225), "rocket": (30, 120, 240), "grenade": (60, 150, 70)}
-POWERUP_LABELS = {"heal": "FULL HP", "rocket": "ROCKET LAUNCHER", "grenade": "GRENADE"}
+POWERUP_COLORS = {"rocket": (30, 120, 240), "grenade": (60, 150, 70)}
+POWERUP_LABELS = {"rocket": "ROCKET LAUNCHER", "grenade": "GRENADE"}
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -215,19 +215,11 @@ def powerup_sprite(size: int, kind: str) -> Sprite:
     shine = (int(r * 0.7), int(r * 0.7))
     cv2.ellipse(canvas, (c, c), shine, 0, 200, 290, (255, 255, 255, 140), 3 * SUPERSAMPLE, cv2.LINE_AA)
     icon_size = r * 0.42
-    {"heal": draw_cross_icon, "rocket": draw_rocket_icon, "grenade": draw_grenade_icon}[kind](
-        canvas, c, icon_size
-    )
+    {"rocket": draw_rocket_icon, "grenade": draw_grenade_icon}[kind](canvas, c, icon_size)
     return downsample(canvas, size, size)
 
 
 WHITE_BGRA = (255, 255, 255, 255)
-
-
-def draw_cross_icon(canvas: np.ndarray, c: int, k: float) -> None:
-    arm = int(k * 0.36)
-    cv2.rectangle(canvas, (int(c - k), c - arm), (int(c + k), c + arm), WHITE_BGRA, -1)
-    cv2.rectangle(canvas, (c - arm, int(c - k)), (c + arm, int(c + k)), WHITE_BGRA, -1)
 
 
 def draw_rocket_icon(canvas: np.ndarray, c: int, k: float) -> None:
