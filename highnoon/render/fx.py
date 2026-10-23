@@ -125,6 +125,7 @@ class FX:
             "safe": self._safe,
             "pickup": self._pickup,
             "camping": self._camping,
+            "dry_fire": self._dry_fire,
         }
 
     def update(self, t: float, effects) -> None:
@@ -200,6 +201,9 @@ class FX:
 
     def _safe(self, effect, t: float) -> None:
         self._float_text("SAFE!", effect, t, (140, 240, 160), 52)
+
+    def _dry_fire(self, effect, t: float) -> None:
+        self._float_text("EMPTY!", effect, t, (60, 60, 235), 40, 0.7)
 
     def _camping(self, effect, t: float) -> None:
         self.particles.burst(effect.pos, 10, (60, 60, 235), (60, 200), (0.2, 0.5), (2, 4), gravity=False)

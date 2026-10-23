@@ -55,7 +55,8 @@ class Hud:
             self._announcement_sprite(text, size, color, scale)
         for label, color in (("DUCK!", RED), ("SAFE", SAFE_GREEN)):
             self.text.get(label, int(46 * scale), color, TITLE_FONT, stroke=3)
-        self._reload_warning_sprite(scale)
+        for player_id in self.colors:
+            self._reload_warning_sprite(player_id, scale)
         for warning in (GET_UP_WARNING, CAMPER_WARNING):
             self._camping_sprite(warning, scale)
         self.text.get("RELOADING", int(26 * scale), GOLD, HUD_FONT, stroke=2)
@@ -100,6 +101,7 @@ class Hud:
         self._draw_float_texts(image, t, scale)
         for player in visible:
             self._draw_card(image, game, player, t, scale)
+        self._draw_reload_warnings(image, game, visible, t, scale)
         self._draw_banner(image, game, scale)
         if game.winner is not None:
             self._draw_winner(image, game, t, scale)
@@ -188,8 +190,6 @@ class Hud:
         reload_y = card_top - 34 * scale
         if state.frame.ducked and state.ammo < game.cfg.max_ammo and game.mode == "duel":
             self._draw_reload_bar(image, cx, reload_y, state.frame.reload_progress, scale)
-        elif needs_reload(game, player_id):
-            self._draw_reload_warning(image, cx, reload_y, t, scale)
         ducked_for = state.frame.ducked_for if state.frame.ducked else 0.0
         if game.mode == "duel" and ducked_for >= game.cfg.camp_warning_s:
             warning = CAMPER_WARNING if ducked_for >= game.cfg.camp_grace_s else GET_UP_WARNING
@@ -212,15 +212,19 @@ class Hud:
         filled = max(bar_h, int(bar_w * progress))
         rounded_rect(image, left, top, left + filled, top + bar_h, bar_h // 2, GOLD)
 
-    def _reload_warning_sprite(self, scale: float):
-        return self.text.get(
-            RELOAD_WARNING, int(RELOAD_WARNING_SIZE * scale), RED, TITLE_FONT, stroke=3, shadow=3
-        )
+    def _reload_warning_sprite(self, player_id: int, scale: float):
+        text = f"P{player_id}: {RELOAD_WARNING}"
+        color = self.colors.get(player_id, WHITE)
+        return self.text.get(text, int(RELOAD_WARNING_SIZE * scale), color, TITLE_FONT, stroke=3, shadow=3)
 
-    def _draw_reload_warning(self, image, x: float, y: float, t: float, scale: float) -> None:
+    def _draw_reload_warnings(self, image, game: Game, players: list[Player], t: float, scale: float) -> None:
+        height, width = image.shape[:2]
+        empty = [p.id for p in players if needs_reload(game, p.id) and not game.states[p.id].frame.ducked]
         pulse = 1.0 + 0.12 * abs(math.sin(t * 8))
         alpha = 1.0 if int(t * 4) % 2 == 0 else 0.55
-        blit_center(image, assets.scaled(self._reload_warning_sprite(scale), pulse), x, y, alpha)
+        for row, player_id in enumerate(empty):
+            sprite = assets.scaled(self._reload_warning_sprite(player_id, scale), pulse)
+            blit_center(image, sprite, width / 2, height * 0.5 + row * 60 * scale, alpha)
 
     def _draw_float_texts(self, image, t: float, scale: float) -> None:
         for text in self.fx.texts:
@@ -370,7 +374,15 @@ def debug_lines(game: Game, player: Player) -> list[str]:
         f"aim {'ON' if frame.aiming else 'off'}  head {frame.head_pos:.2f} (duck > {wall_top:.2f})",
         f"ammo {game.states[player.id].ammo}",
         hand,
+        ignored_fist_line(game.states[player.id], game.now),
     ]
+
+
+def ignored_fist_line(state, t: float) -> str:
+    if state.last_ignored_fist is None:
+        return "last fist: ok"
+    reason, when = state.last_ignored_fist
+    return f"last ignored fist: {reason} ({t - when:.1f}s ago)"
 
 
 def debug_panel_origin(image, player: Player, panel_w: int, panel_h: int) -> tuple[int, int]:

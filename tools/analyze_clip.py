@@ -90,6 +90,8 @@ def main() -> None:
             state = game.states.get(player.id)
             if state is None:
                 continue
+            if state.frame.ignored_fist is not None:
+                log(player.id, f"FIST IGNORED ({state.frame.ignored_fist})")
             if state.frame.reload and state.ammo > ammo_before.get(player.id, state.ammo):
                 log(player.id, "RELOAD")
             if state.frame.ducked != was_ducked.get(player.id, False):

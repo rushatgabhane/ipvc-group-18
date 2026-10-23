@@ -28,6 +28,7 @@ class PlayerState:
     rockets: int = 0
     grenades: int = 0
     next_camp_drain_t: float | None = None
+    last_ignored_fist: tuple[str, float] | None = None
 
 
 @dataclass

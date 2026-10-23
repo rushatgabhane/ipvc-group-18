@@ -85,6 +85,10 @@ class Game:
         return rect_polygon(0.0, self.wall_top, float(self.width), float(self.height))
 
     @property
+    def now(self) -> float:
+        return self._t
+
+    @property
     def round_live(self) -> bool:
         return self.mode == "duel" and self.round_over_t is None
 
@@ -139,6 +143,8 @@ class Game:
         if state.frame.reload:
             state.ammo = self.cfg.max_ammo
         self._drain_if_camping(player.id, state, t)
+        if state.frame.ignored_fist is not None:
+            state.last_ignored_fist = (state.frame.ignored_fist, t)
         if state.frame.shot is not None and self.round_live:
             self._fire(player.id, state, state.frame.shot, t)
 
@@ -175,6 +181,8 @@ class Game:
             arrival = t + self.cfg.bullet_travel_s
             self.bullets.append(Bullet(shooter, shot.origin, shot.direction, length, t, arrival))
         else:
+            self.effects.append(Effect("dry_fire", shot.origin, t, shooter))
+            state.last_ignored_fist = ("no ammo", t)
             return
         self.effects.append(Effect("muzzle", shot.origin, t, shooter))
 

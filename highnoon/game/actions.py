@@ -26,6 +26,7 @@ class ActionFrame:
     ducked_for: float = 0.0
     head_pos: float = 0.0
     hand_closed: bool | None = None
+    ignored_fist: str | None = None
 
 
 @dataclass(slots=True)
@@ -54,8 +55,9 @@ class PlayerActions:
             return ActionFrame(ducked=self.ducked)
         head_pos = self._update_duck(signals.head_y / frame_height)
         reload, reload_progress = self._update_reload(t)
-        aiming, shot = self._update_trigger(signals, t)
+        aiming, shot, ignored_fist = self._update_trigger(signals, t)
         return ActionFrame(
+            ignored_fist=ignored_fist,
             aiming=aiming,
             ducked=self.ducked,
             shot=shot,
@@ -91,34 +93,43 @@ class PlayerActions:
         self._recent_aims.clear()
         self._aiming_since = None
 
-    def _update_trigger(self, signals: MotionSignals, t: float) -> tuple[bool, Shot | None]:
-        fist_just_closed = self._update_hand(signals.hand_openness, t)
+    def _update_trigger(self, signals: MotionSignals, t: float) -> tuple[bool, Shot | None, str | None]:
+        fist_closed, held_open = self._update_hand(signals.hand_openness, t)
         if not signals.aim_valid:
             self._stop_aiming()
-            return False, None
+            return False, None, "not aiming" if fist_closed else None
         if self._aiming_since is None:
             self._aiming_since = t
         if self.ducked:
             self._recent_aims.clear()
-            return False, None
+            return False, None, "ducked" if fist_closed else None
         self._remember_aim(AimSample(t, signals.aim_origin, signals.aim_dir))
-
-        armed = t - self._aiming_since >= self.cfg.armed_after_s
-        cooled_down = t - self._last_shot_t >= self.cfg.fire_cooldown_s
-        if not (fist_just_closed and armed and cooled_down):
-            return True, None
+        if not fist_closed:
+            return True, None, None
+        blocker = self._fire_blocker(t, held_open)
+        if blocker is not None:
+            return True, None, blocker
         self._last_shot_t = t
         steady_aim = self._recent_aims[0]
-        return True, Shot(steady_aim.origin.copy(), steady_aim.direction.copy())
+        return True, Shot(steady_aim.origin.copy(), steady_aim.direction.copy()), None
+
+    def _fire_blocker(self, t: float, held_open: bool) -> str | None:
+        if t - self._aiming_since < self.cfg.armed_after_s:
+            return "aim settling"
+        if t - self._last_shot_t < self.cfg.fire_cooldown_s:
+            return "cooldown"
+        if not held_open:
+            return "hand open too briefly"
+        return None
 
     def _remember_aim(self, sample: AimSample) -> None:
         self._recent_aims.append(sample)
         while sample.t - self._recent_aims[0].t > self.cfg.aim_lookback_s:
             self._recent_aims.popleft()
 
-    def _update_hand(self, openness: float | None, t: float) -> bool:
+    def _update_hand(self, openness: float | None, t: float) -> tuple[bool, bool]:
         if openness is None:
-            return False
+            return False, False
         was_closed = self._hand_closed
         if openness < self.cfg.fist_closed:
             self._hand_closed = True
@@ -130,4 +141,4 @@ class PlayerActions:
         just_closed = was_closed is False and self._hand_closed is True
         if self._hand_closed:
             self._hand_open_since = None
-        return just_closed and held_open
+        return just_closed, held_open

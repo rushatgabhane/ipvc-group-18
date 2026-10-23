@@ -108,3 +108,15 @@ def test_can_shoot_right_after_standing_up_with_arm_ready():
     ducked = [sig(head_y=600)] * 30
     frames = run(PlayerActions(CFG), [sig()] * 15 + ducked + [sig(), sig(hand=FIST)])
     assert shot_frames(frames) == [46]
+
+
+def test_ignored_fists_report_why():
+    frames = run(
+        PlayerActions(CFG), [sig()] * 15 + [sig(hand=FIST), sig(), sig(), sig(), sig(), sig(), sig(hand=FIST)]
+    )
+    assert frames[15].shot is not None
+    assert frames[21].ignored_fist == "cooldown"
+    frames = run(PlayerActions(CFG), [sig()] * 3 + [sig(hand=FIST)])
+    assert frames[3].ignored_fist == "aim settling"
+    frames = run(PlayerActions(CFG), [sig(aim=False)] * 5 + [sig(aim=False, hand=FIST)])
+    assert frames[5].ignored_fist == "not aiming"
