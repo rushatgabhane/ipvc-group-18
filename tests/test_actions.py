@@ -68,13 +68,13 @@ def test_shot_uses_aim_from_before_the_trigger():
 def test_duck_when_head_goes_below_the_wall():
     actions = PlayerActions(CFG)
     down = [sig(head_y=y) for y in (400, 500, 545)]
-    near_edge = [sig(head_y=y) for y in (530, 525, 535)]
+    near_edge = [sig(head_y=y) for y in (535, 530, 538)]
     frames = run(actions, [sig(head_y=300)] * 5 + down + near_edge)
     assert not frames[6].ducked
     assert frames[7].ducked
     assert all(f.ducked for f in frames[8:])
     assert not frames[-1].aiming
-    assert not run(actions, [sig(head_y=510)], t0=10)[-1].ducked
+    assert not run(actions, [sig(head_y=525)], t0=10)[-1].ducked
 
 
 def test_duck_is_absolute_not_relative_to_standing_height():
@@ -102,3 +102,9 @@ def test_rapid_fist_spam_is_blocked():
 def test_hand_must_stay_open_before_next_shot():
     blink = [sig()] * 15 + [sig(hand=FIST)] * 20 + [sig()] * 2 + [sig(hand=FIST)]
     assert shot_frames(run(PlayerActions(CFG), blink)) == [15]
+
+
+def test_can_shoot_right_after_standing_up_with_arm_ready():
+    ducked = [sig(head_y=600)] * 30
+    frames = run(PlayerActions(CFG), [sig()] * 15 + ducked + [sig(), sig(hand=FIST)])
+    assert shot_frames(frames) == [46]

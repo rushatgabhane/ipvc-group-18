@@ -54,7 +54,7 @@ class GameConfig:
     fire_cooldown_s: float = 0.6
     open_hand_s: float = 0.15
     cover_height: float = 0.25
-    duck_margin: float = 0.03
+    duck_margin: float = 0.015
     max_ammo: int = 3
     reload_s: float = 0.8
     camp_grace_s: float = 7.0

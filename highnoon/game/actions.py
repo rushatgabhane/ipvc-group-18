@@ -93,11 +93,14 @@ class PlayerActions:
 
     def _update_trigger(self, signals: MotionSignals, t: float) -> tuple[bool, Shot | None]:
         fist_just_closed = self._update_hand(signals.hand_openness, t)
-        if not signals.aim_valid or self.ducked:
+        if not signals.aim_valid:
             self._stop_aiming()
             return False, None
         if self._aiming_since is None:
             self._aiming_since = t
+        if self.ducked:
+            self._recent_aims.clear()
+            return False, None
         self._remember_aim(AimSample(t, signals.aim_origin, signals.aim_dir))
 
         armed = t - self._aiming_since >= self.cfg.armed_after_s
