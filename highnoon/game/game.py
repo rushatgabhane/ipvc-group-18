@@ -92,6 +92,11 @@ class Game:
     def round_live(self) -> bool:
         return self.mode == "duel" and self.round_over_t is None
 
+    def return_time_left(self, t: float) -> float:
+        if self.mode == "idle" or self._players_missing_since is None:
+            return 0.0
+        return max(0.0, self.cfg.player_grace_s - (t - self._players_missing_since))
+
     def countdown_left(self, t: float) -> float:
         return max(0.0, self.countdown_end_t - t) if self.mode == "countdown" else 0.0
 

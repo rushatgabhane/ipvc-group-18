@@ -254,3 +254,12 @@ def test_camping_to_zero_hands_the_round_to_the_opponent():
     game.states[1].hp = 5
     step(game, p1_ducked, int((game.cfg.camp_grace_s + 0.2) / DT), t)
     assert game.states[1].hp == 0 and game.winner == 2
+
+
+def test_player_leaving_gets_five_seconds_to_return():
+    game, t = start_duel()
+    game.states[2].hp = 60
+    t = step(game, alone, int(3 / DT), t)
+    assert game.mode == "duel" and 0 < game.return_time_left(t) <= 2.1
+    t = step(game, duel, 2, t)
+    assert game.mode == "duel" and game.states[2].hp == 60 and game.return_time_left(t) == 0
