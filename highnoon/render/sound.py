@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 SOUND_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "sounds"
@@ -11,10 +10,8 @@ SOUND_FILES = (
     "explosion",
     "reload",
     "dry_fire",
-    "count_1",
-    "count_2",
-    "count_3",
     "fight",
+    "ko",
 )
 MUZZLE_SOUNDS = {"gun": "gunshot", "rocket": "rocket_launch", "grenade": "grenade_throw"}
 EFFECT_SOUNDS = {
@@ -38,8 +35,8 @@ class SoundBoard:
             name: pyglet.media.load(str(SOUND_DIR / f"{name}.wav"), streaming=False) for name in SOUND_FILES
         }
         self._seen: set[int] = set()
-        self._count: int | None = None
         self._mode: str | None = None
+        self._winner: int | None = None
 
     def update(self, game, t: float) -> None:
         current = {id(effect) for effect in game.effects}
@@ -47,9 +44,8 @@ class SoundBoard:
             if id(effect) not in self._seen and (name := effect_sound(effect)) is not None:
                 self._sources[name].play()
         self._seen = current
-        count = math.ceil(game.countdown_left(t)) if game.mode == "countdown" else None
-        if count in (1, 2, 3) and count != self._count:
-            self._sources[f"count_{count}"].play()
         if game.mode == "duel" and self._mode == "countdown":
             self._sources["fight"].play()
-        self._count, self._mode = count, game.mode
+        if game.winner is not None and self._winner is None:
+            self._sources["ko"].play()
+        self._mode, self._winner = game.mode, game.winner
