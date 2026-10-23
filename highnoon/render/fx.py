@@ -19,6 +19,8 @@ ANNOUNCE_IN_S = 0.18
 ANNOUNCE_OUT_S = 0.2
 ANNOUNCE_MIN_HOLD_S = 0.45
 MAX_PENDING = 2
+KNOCKOUT = ("K.O.!", (40, 40, 220), 200)
+KNOCKOUT_S = 1.3
 
 
 def headshot_announcement(color) -> tuple[str, tuple[int, int, int], int]:
@@ -152,9 +154,9 @@ class FX:
         self.pending = self.pending[-(MAX_PENDING - 1) :] + [Announcement(text, t, color, duration, size)]
         self._advance_announcements(t)
 
-    def drop_pending(self) -> None:
-        self.pending.clear()
-        self._hurry_current()
+    def interrupt(self, text: str, t: float, color, size: int, duration: float) -> None:
+        self.announcement, self.pending = None, []
+        self.announce(text, t, color, size, duration)
 
     def announcing(self) -> bool:
         return self.announcement is not None or bool(self.pending)

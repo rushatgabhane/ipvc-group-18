@@ -44,10 +44,11 @@ class Hud:
         self._hp_shown: dict[int, float] = {}
         self._hp_trail: dict[int, float] = {}
         self._winner_reveal_t: float | None = None
+        self._knockout_shown = False
 
     def prewarm(self, height: int) -> None:
         scale = height / 720.0
-        announcements = [effects.BOOM, effects.GRENADE_BOOM, effects.GRENADE_WARNING]
+        announcements = [effects.BOOM, effects.GRENADE_BOOM, effects.GRENADE_WARNING, effects.KNOCKOUT]
         for player_id in self.colors:
             color = self.colors[player_id]
             announcements.append(effects.headshot_announcement(color))
@@ -329,10 +330,13 @@ class Hud:
 
     def _winner_revealed(self, game: Game, t: float) -> bool:
         if game.winner is None:
-            self._winner_reveal_t = None
+            self._winner_reveal_t, self._knockout_shown = None, False
             return False
         if self._winner_reveal_t is None:
-            self.fx.drop_pending()
+            if not self._knockout_shown:
+                text, color, size = effects.KNOCKOUT
+                self.fx.interrupt(text, t, color, size, effects.KNOCKOUT_S)
+                self._knockout_shown = True
             if self.fx.announcing():
                 return False
             self._winner_reveal_t = t
