@@ -86,9 +86,9 @@ off by default), `b` toggle background, `f` fullscreen. Sound effects are on; `-
 Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in frame.
 
 You can stand close to each other: on screen the game pushes the two players apart (each person is cut
-out with their own segmentation mask and moved outward, with their pose, face and hands), so they are
-always at least 55% of the screen width apart. Players who already stand further apart are not moved.
-Change it with `--spread 0.7` or turn it off with `--spread 0`.
+out with their own segmentation mask and moved outward, with their pose, face and hands), so you look
+twice as far apart as you really are. Nobody is pushed off screen: each player's body stays at least
+12% of the width from the edge. Change it with `--spread 3` or turn it off with `--spread 1`.
 
 | Action | Movement |
 |---|---|

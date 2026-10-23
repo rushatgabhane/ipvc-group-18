@@ -24,8 +24,8 @@ def parse_args() -> Config:
     parser.add_argument(
         "--spread",
         type=float,
-        default=0.55,
-        help="on screen, keep players at least this fraction of the width apart (0 = off)",
+        default=2.0,
+        help="on screen, players stand this many times further apart than in real life (1 = off)",
     )
     parser.add_argument("--headless", action="store_true", help="no window")
     parser.add_argument("--mute", action="store_true", help="no sound effects")

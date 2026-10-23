@@ -109,6 +109,6 @@ class Config:
     metrics_csv: Path | None = None
     signals_csv: Path | None = None
     games_csv: Path | None = Path("results/games.csv")
-    stage_spread: float = 0.55
+    stage_spread: float = 2.0
     record_video: Path | None = None
     max_frames: int | None = None

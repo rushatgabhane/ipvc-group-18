@@ -26,23 +26,23 @@ def test_players_are_pushed_apart_with_their_pixels_and_hands():
     perception = Perception(
         Frame(1, image, 0.0, 0), [pose_at(170), pose_at(230)], [], np.maximum(*masks), 0.0, {}, [hand], masks
     )
-    stage = StageSpread(0.35)
-    for _ in range(40):
+    stage = StageSpread(2.0)
+    for _ in range(60):
         spread = stage.apply(perception)
-    assert [float(p.keypoints[0, 0]) for p in spread.poses] == [130.0, 270.0]
-    assert tuple(spread.frame.image[50, 125]) == (255, 0, 0)
-    assert tuple(spread.frame.image[50, 265]) == (0, 0, 255)
-    assert spread.mask[50, 200] == 0.0 and spread.mask[50, 125] == 1.0
-    assert float(spread.hands[0].landmarks[0, 0]) == 245.0
+    assert [float(p.keypoints[0, 0]) for p in spread.poses] == [140.0, 260.0]
+    assert tuple(spread.frame.image[50, 135]) == (255, 0, 0)
+    assert tuple(spread.frame.image[50, 255]) == (0, 0, 255)
+    assert spread.mask[50, 200] == 0.0 and spread.mask[50, 135] == 1.0
+    assert float(spread.hands[0].landmarks[0, 0]) == 235.0
 
 
-def test_players_already_far_apart_are_not_moved():
+def test_players_near_the_edges_are_not_pushed_off_screen():
     image = np.zeros((HEIGHT, WIDTH, 3), np.uint8)
-    masks = [person_mask(40, 60), person_mask(340, 360)]
+    masks = [person_mask(50, 70), person_mask(330, 350)]
     perception = Perception(
-        Frame(1, image, 0.0, 0), [pose_at(50), pose_at(350)], [], None, 0.0, {}, [], masks
+        Frame(1, image, 0.0, 0), [pose_at(60), pose_at(340)], [], None, 0.0, {}, [], masks
     )
-    stage = StageSpread(0.35)
-    for _ in range(10):
+    stage = StageSpread(2.0)
+    for _ in range(60):
         spread = stage.apply(perception)
-    assert spread is perception
+    assert [round(float(p.keypoints[0, 0])) for p in spread.poses] == [48, 352]

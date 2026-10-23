@@ -12,17 +12,18 @@ NOSE = 0
 WRISTS = [15, 16]
 HAND_WRIST = 0
 FOLLOW = 0.2
+EDGE_MARGIN = 0.12
 
 
 class StageSpread:
-    def __init__(self, min_gap: float):
-        self.min_gap = min_gap
+    def __init__(self, factor: float):
+        self.factor = factor
         self.split: float | None = None
         self.shift = 0.0
 
     def apply(self, perception: Perception) -> Perception:
         width = perception.frame.size[0]
-        if self.min_gap <= 0 or not perception.poses:
+        if self.factor <= 1 or not perception.poses:
             return perception
         poses = perception.poses
         centers = np.array([pose.keypoints[SHOULDERS, 0].mean() for pose in poses], np.float32)
@@ -54,7 +55,8 @@ class StageSpread:
         if centers.size < 2:
             return
         left, right = np.sort(centers)[:2]
-        wanted_shift = max(0.0, (self.min_gap * width - float(right - left)) / 2)
+        room = min(float(left), width - float(right)) - EDGE_MARGIN * width
+        wanted_shift = min(float(right - left) * (self.factor - 1) / 2, max(0.0, room))
         self.split += FOLLOW * (float(left + right) / 2 - self.split)
         self.shift += FOLLOW * (wanted_shift - self.shift)
 
