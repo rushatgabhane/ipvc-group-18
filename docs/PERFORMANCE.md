@@ -40,7 +40,7 @@ Reproduce: `python -m highnoon --max-frames 1800 --metrics-csv results/soak.csv`
 | pose_landmarker_full | 32.9 ms | 33.5 ms |
 
 Full uses the entire 33 ms budget by itself. Lite leaves ~7 ms headroom. Revisit if lite's
-keypoints turn out too noisy for aiming (`--pose-model full`).
+keypoints turn out too noisy for aiming (the full model is no longer downloaded or selectable).
 
 ### 2. Pose and face in parallel
 | | Per frame |
@@ -108,6 +108,36 @@ throughput is unchanged (30 fps) and latency rose about 3 ms. The rules that kee
 - The flying powerup (token sprite built once, rotated with `warpAffine` on its ~60 px box, plus a
   3-circle trail, glow and label) costs 0.56 ms median / 0.64 ms p95 per frame, and only while one
   is on screen. Its position is a closed-form parabola, so the game logic costs nothing measurable.
+
+### 8b. Render cleanup pass (measured on a synthetic duel frame, M1 Pro)
+Profiling the game layer showed the translucent HUD panels were the biggest cost (0.8 ms each, 3 per
+frame) because they blended in float numpy every frame. Changes and results:
+- **Sprites carry precomputed blend weights** (`assets.Sprite`) and blit with `cv2.blendLinear`:
+  11 us per HUD-sized blit instead of 129 us (float numpy).
+- **Panels are cached sprites** per size instead of being rebuilt and blended in numpy each frame.
+- **Vignette baked into the backdrop and wall** once, instead of a full-frame multiply per frame
+  (0.68 ms saved).
+- **Screen shake moved to the GPU**: the display offsets and slightly zooms the texture instead of
+  `warpAffine` on the whole frame.
+- **Rotated rocket/grenade/powerup sprites are cached** in 4 degree steps.
+- **Big announcement texts are rendered once at startup** (BOOM!, GRENADE! DUCK!, winner names,
+  countdowns), so the first explosion no longer stalls a frame (39 ms -> 11 ms worst frame).
+- **Hit testing is vectorised**: every shot, rocket step and the whole 60-step rocket arc preview are
+  tested against the wall, both hitboxes and the powerup in one numpy batch (segments vs circles and
+  polygons). Game update: 0.38 ms median with a rocket preview active.
+
+| Scenario (render per frame) | median | p95 | worst |
+|---|---|---|---|
+| Duel, bullets only, before | 6.2 ms | 7.0 ms | |
+| Duel, bullets only, after | 2.4 ms | 3.5 ms | 5.0 ms |
+| Rocket in flight + explosion | 2.5 ms | 4.8 ms | 7.8 ms |
+| Grenade + explosion + round end | 3.0 ms | 5.4 ms | 10.9 ms |
+
+On `clips/smoke.mp4` the full pipeline render stage went from 7.4 ms to 3.1 ms mean.
+
+Removed to keep the code small: the flick trigger, the OpenCV window backend (16 ms/frame vs 2.3 ms
+for pyglet), and the benchmark-only switches (`--sequential`, `--pose-model full`, `--no-face`,
+`--no-seg`, inline hands, `tools/bench_models.py`). The measurements they produced are kept above.
 
 ### 9. Newest-frame-only capture
 The capture thread overwrites a single slot instead of filling a queue. If any stage gets slow,

@@ -1,15 +1,3 @@
-"""T3: persistent player identities.
-
-Baseline: optimal (Hungarian) assignment of detected bodies to player slots by torso-centre
-distance, gated by a maximum jump. A slot survives short detection losses for
-`lost_timeout_s`, so a briefly occluded player gets the same id back. Faces are then assigned
-to players by matching the face centre to the pose nose keypoint.
-
-Known weakness to work on (T3 owner): distance-only matching can swap ids when players
-cross. Next steps are a constant-velocity Kalman prediction and an appearance cue
-(e.g. torso HSV histogram) added to the cost matrix.
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -19,101 +7,107 @@ from highnoon.config import TrackingConfig
 from highnoon.contracts import Perception, Player
 
 NOSE = 0
+SHOULDERS = [11, 12]
 POSE_WRISTS = (15, 16)
-_INF_COST = 1e6
+HAND_WRIST = 0
+MIN_HAND_GATE_PX = 60.0
+HAND_GATE_PER_SHOULDER_WIDTH = 0.8
+NO_MATCH = 1e6
 
 
 class IdentityTracker:
     def __init__(self, cfg: TrackingConfig, max_players: int = 2):
         self.cfg = cfg
         self.players = [Player(id=i + 1) for i in range(max_players)]
-        self._active = [False] * max_players  # slot holds an identity (seen within timeout)
+        self._active = [False] * max_players
         self._last_center: list[np.ndarray | None] = [None] * max_players
-        self.reassigned: set[int] = set()  # player ids that got a new identity this frame
+        self.reassigned: set[int] = set()
 
     def update(self, perception: Perception) -> list[Player]:
-        frame = perception.frame
-        t = frame.t_capture
-        width = frame.size[0]
+        t = perception.frame.t_capture
         self.reassigned = set()
-
-        # Release identities that have been lost for too long.
-        for i, p in enumerate(self.players):
-            if self._active[i] and not p.visible and t - p.last_seen > self.cfg.lost_timeout_s:
-                self._active[i] = False
-                self._last_center[i] = None
+        self._release_lost_players(t)
 
         centers = [pose.center() for pose in perception.poses]
-        assigned = self._assign(centers, width)
+        assignment = self._match_bodies_to_slots(centers, perception.frame.size[0])
+        for player in self.players:
+            player.visible, player.pose, player.face, player.hands = False, None, None, {}
+        for detection, slot in assignment.items():
+            self._claim_slot(slot, perception.poses[detection], centers[detection], t)
 
-        for p in self.players:
-            p.visible = False
-            p.pose = None
-            p.face = None
-            p.hands = {}
-        for det_idx, slot in assigned.items():
-            p = self.players[slot]
-            if not self._active[slot]:
-                self.reassigned.add(p.id)
-                self._active[slot] = True
-            p.pose = perception.poses[det_idx]
-            p.visible = True
-            p.last_seen = t
-            self._last_center[slot] = centers[det_idx]
-
-        self._assign_faces(perception)
-        self._assign_hands(perception)
+        self._attach_faces(perception)
+        self._attach_hands(perception)
         return self.players
 
-    def _assign(self, centers: list[np.ndarray], width: int) -> dict[int, int]:
-        """Map detection index -> player slot index."""
+    def _release_lost_players(self, t: float) -> None:
+        for slot, player in enumerate(self.players):
+            lost_too_long = not player.visible and t - player.last_seen > self.cfg.lost_timeout_s
+            if self._active[slot] and lost_too_long:
+                self._active[slot] = False
+                self._last_center[slot] = None
+
+    def _claim_slot(self, slot: int, pose, center: np.ndarray, t: float) -> None:
+        player = self.players[slot]
+        if not self._active[slot]:
+            self.reassigned.add(player.id)
+            self._active[slot] = True
+        player.pose = pose
+        player.visible = True
+        player.last_seen = t
+        self._last_center[slot] = center
+
+    def _match_bodies_to_slots(self, centers: list[np.ndarray], width: int) -> dict[int, int]:
         if not centers:
             return {}
-        max_dist = self.cfg.max_match_distance * width
-        n_slots = len(self.players)
-        cost = np.full((len(centers), n_slots), _INF_COST)
-        for s in range(n_slots):
-            if self._active[s] and self._last_center[s] is not None:
-                d = np.linalg.norm(np.asarray(centers) - self._last_center[s], axis=1)
-                cost[:, s] = np.where(d <= max_dist, d, _INF_COST)
-
+        cost = self._distance_cost(centers, self.cfg.max_match_distance * width)
         rows, cols = linear_sum_assignment(cost)
-        result = {r: c for r, c in zip(rows, cols, strict=True) if cost[r, c] < _INF_COST}
+        assignment = {r: c for r, c in zip(rows, cols, strict=True) if cost[r, c] < NO_MATCH}
 
-        # New detections take free slots, left-to-right so Player 1 is the leftmost newcomer.
-        free = [s for s in range(n_slots) if not self._active[s] and s not in result.values()]
-        new = sorted((r for r in range(len(centers)) if r not in result), key=lambda r: centers[r][0])
-        for r, s in zip(new, free, strict=False):
-            result[r] = s
-        return result
+        taken = set(assignment.values())
+        free_slots = [s for s in range(len(self.players)) if not self._active[s] and s not in taken]
+        newcomers = sorted(
+            (r for r in range(len(centers)) if r not in assignment), key=lambda r: centers[r][0]
+        )
+        for detection, slot in zip(newcomers, free_slots, strict=False):
+            assignment[detection] = slot
+        return assignment
 
-    def _assign_faces(self, perception: Perception) -> None:
+    def _distance_cost(self, centers: list[np.ndarray], max_distance: float) -> np.ndarray:
+        cost = np.full((len(centers), len(self.players)), NO_MATCH)
+        for slot in range(len(self.players)):
+            last = self._last_center[slot]
+            if self._active[slot] and last is not None:
+                distance = np.linalg.norm(np.asarray(centers) - last, axis=1)
+                cost[:, slot] = np.where(distance <= max_distance, distance, NO_MATCH)
+        return cost
+
+    def _attach_faces(self, perception: Perception) -> None:
         visible = [p for p in self.players if p.visible]
         if not visible or not perception.faces:
             return
         noses = np.array([p.pose.keypoints[NOSE] for p in visible])
         face_centers = np.array([f.center() for f in perception.faces])
         cost = np.linalg.norm(face_centers[:, None, :] - noses[None, :, :], axis=2)
-        rows, cols = linear_sum_assignment(cost)
-        for r, c in zip(rows, cols, strict=True):
+        for r, c in zip(*linear_sum_assignment(cost), strict=True):
             face = perception.faces[r]
-            # The nose must lie within ~one face-size of the face centre.
-            size = max(face.bbox[2] - face.bbox[0], face.bbox[3] - face.bbox[1])
-            if cost[r, c] <= size:
+            face_size = max(face.bbox[2] - face.bbox[0], face.bbox[3] - face.bbox[1])
+            if cost[r, c] <= face_size:
                 visible[c].face = face
 
-    def _assign_hands(self, perception: Perception) -> None:
-        """Attach each hand to the nearest pose wrist (hands may be 1-2 frames old)."""
-        slots = [(p, w) for p in self.players if p.visible for w in POSE_WRISTS]
-        if not slots or not perception.hands:
+    def _attach_hands(self, perception: Perception) -> None:
+        wrist_slots = [(p, wrist) for p in self.players if p.visible for wrist in POSE_WRISTS]
+        if not wrist_slots or not perception.hands:
             return
-        wrists = np.array([p.pose.keypoints[w] for p, w in slots])
-        hand_wrists = np.array([h.landmarks[0] for h in perception.hands])
-        cost = np.linalg.norm(hand_wrists[:, None, :] - wrists[None, :, :], axis=2)
-        rows, cols = linear_sum_assignment(cost)
-        for r, c in zip(rows, cols, strict=True):
-            player, wrist = slots[c]
-            shoulders = player.pose.keypoints[[11, 12]]
-            gate = max(60.0, 0.8 * float(np.linalg.norm(shoulders[0] - shoulders[1])))
-            if cost[r, c] <= gate:
+        pose_wrists = np.array([p.pose.keypoints[wrist] for p, wrist in wrist_slots])
+        hand_wrists = np.array([h.landmarks[HAND_WRIST] for h in perception.hands])
+        cost = np.linalg.norm(hand_wrists[:, None, :] - pose_wrists[None, :, :], axis=2)
+        for r, c in zip(*linear_sum_assignment(cost), strict=True):
+            player, wrist = wrist_slots[c]
+            if cost[r, c] <= hand_gate(player):
                 player.hands[wrist] = perception.hands[r]
+
+
+def hand_gate(player: Player) -> float:
+    left, right = player.pose.keypoints[SHOULDERS]
+    shoulder_width = float(np.linalg.norm(left - right))
+    return max(MIN_HAND_GATE_PX, HAND_GATE_PER_SHOULDER_WIDTH * shoulder_width)

@@ -1,8 +1,3 @@
-"""Central configuration. Every tunable lives here so experiments are reproducible.
-
-Defaults are chosen from measurements on an M1 Pro (see docs/PERFORMANCE.md).
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,125 +9,76 @@ MODELS_DIR = ROOT / "models"
 
 @dataclass
 class CaptureConfig:
-    source: str = "0"  # camera index ("0") or path to a video file
+    source: str = "0"
     width: int = 1280
     height: int = 720
     fps: int = 30
-    mirror: bool = True  # flip horizontally so players see a mirror image
-    realtime: bool = True  # video files: pace to their native fps (False = as fast as possible)
-    loop: bool = False  # video files: restart at the end
+    mirror: bool = True
+    realtime: bool = True
+    loop: bool = False
 
 
 @dataclass
 class PerceptionConfig:
-    # Measured: lite 25 ms vs full 33 ms per frame. Lite keeps us inside a 33 ms (30 fps) budget.
-    pose_model: str = "pose_landmarker_lite"
-    face_model: str = "face_landmarker"
-    hand_model: str = "hand_landmarker"
     max_players: int = 2
-    # Segmentation mask comes from the pose model for ~0.3 ms extra, so T5 gets it nearly free.
-    segmentation: bool = True
-    run_face: bool = True
-    # Hands (for the fist trigger) cost ~15 ms per hand, so they run on their own thread and the
-    # pipeline uses the newest finished result instead of waiting (see vision/perception.py).
-    run_hands: bool = True
-    max_hands: int = 2  # one trigger hand per player; each extra hand costs another ~15 ms
-    hands_async: bool = True  # False = run inline (deterministic, for clip analysis)
-    # Pose and face run on separate threads: measured 36.7 ms sequential -> 25.7 ms parallel.
-    parallel: bool = True
-    # "auto": GPU on Windows/Linux if a subprocess probe shows it works, else CPU (vision/delegate.py).
-    # macOS stays on CPU: the GPU delegate aborts the process there.
+    max_hands: int = 2
     delegate: str = "auto"
     min_detection_confidence: float = 0.5
     min_presence_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
-
-    @property
-    def pose_model_path(self) -> Path:
-        return MODELS_DIR / f"{self.pose_model}.task"
-
-    @property
-    def face_model_path(self) -> Path:
-        return MODELS_DIR / f"{self.face_model}.task"
-
-    @property
-    def hand_model_path(self) -> Path:
-        return MODELS_DIR / f"{self.hand_model}.task"
+    pose_model_path: Path = MODELS_DIR / "pose_landmarker_lite.task"
+    face_model_path: Path = MODELS_DIR / "face_landmarker.task"
+    hand_model_path: Path = MODELS_DIR / "hand_landmarker.task"
 
 
 @dataclass
 class FilterConfig:
-    """One Euro filter parameters (Casiez et al., CHI 2012), in pixel units at capture resolution."""
-
-    min_cutoff: float = 1.0  # Hz; lower = smoother when still, more lag
-    beta: float = 0.05  # speed coefficient; higher = less lag during fast motion
-    d_cutoff: float = 1.0  # Hz; cutoff for the derivative estimate
-    min_visibility: float = 0.5  # keypoints below this are treated as missing
+    min_cutoff: float = 1.0
+    beta: float = 0.05
+    d_cutoff: float = 1.0
+    min_visibility: float = 0.5
 
 
 @dataclass
 class TrackingConfig:
-    max_match_distance: float = 0.25  # fraction of frame width a player may move between frames
-    lost_timeout_s: float = 1.5  # keep a lost player's identity this long before releasing it
+    max_match_distance: float = 0.25
+    lost_timeout_s: float = 1.5
 
 
 @dataclass
 class GameConfig:
-    """T4 rules and action thresholds. Distances are in torso lengths (scale-invariant)."""
-
-    # Fire trigger: "fist" = close the aiming hand (needs hand tracking), "flick" = recoil flick.
-    trigger: str = "fist"
-    fist_closed: float = 1.25  # hand openness below this = closed ...
-    fist_open: float = 1.55  # ... and above this = open again (hysteresis; must reopen between shots)
-    aim_lookback_s: float = 0.1  # shoot along the aim from this long before the trigger
-    # Flick trigger: a quick upward "recoil" flick of the aiming arm.
-    flick_rise_deg: float = 20.0  # elevation gain that counts as a flick ...
-    flick_window_s: float = 0.15  # ... within this time window
-    armed_after_s: float = 0.3  # arm must aim steadily this long first (raising the arm is not a shot)
+    fist_closed: float = 1.25
+    fist_open: float = 1.55
+    aim_lookback_s: float = 0.1
+    armed_after_s: float = 0.3
     fire_cooldown_s: float = 0.35
-    # Duck: a fixed wall covers the bottom `cover_height` of the screen. A player is ducked while
-    # their head is below its top edge, and stands again once the head is `duck_margin` (fraction
-    # of screen height) above it. The margin is hysteresis, so jitter at the edge does not flicker.
     cover_height: float = 0.25
     duck_margin: float = 0.03
-    # Reload: ducking refills the magazine, so every reload costs time behind the wall.
     max_ammo: int = 3
     max_hp: int = 100
     body_damage: int = 15
     head_damage: int = 35
-    # Bullets take time to arrive so the target can react (duck) after seeing the shot.
     bullet_travel_s: float = 0.25
     round_end_s: float = 4.0
-    # Powerups (duel only): one is tossed up from below the screen every `powerup_interval_s`,
-    # flies in a ballistic arc (peak after `powerup_rise_s`) and falls back out. Shooting it
-    # gives its effect to the shooter.
     powerup_interval_s: float = 30.0
     powerup_rise_s: float = 1.8
-    powerup_radius: float = 0.045  # fraction of screen height
-    double_damage_s: float = 10.0
-    # Rocket launcher powerup: the next shot is a rocket that flies a ballistic arc (launched along
-    # the aim, pulled down by gravity) and explodes on the first thing it meets. The blast ignores
-    # the wall, so it is the answer to a player hiding behind cover. Damage falls off linearly from
-    # rocket_damage at the impact to rocket_min_damage at the blast edge.
-    rocket_speed: float = 1.6  # screen heights per second at launch
-    rocket_gravity: float = 1.3  # screen heights per second^2
-    rocket_blast_radius: float = 0.16  # fraction of screen height
+    powerup_radius: float = 0.045
+    rocket_speed: float = 1.6
+    rocket_gravity: float = 1.3
+    rocket_blast_radius: float = 0.16
     rocket_damage: int = 50
     rocket_min_damage: int = 20
-    # Grenade powerup: the next shot lobs a grenade at the opponent. It homes in on them, so moving
-    # does not help; if they are not ducked when it lands after grenade_flight_s, they die.
     grenade_flight_s: float = 1.4
-    grenade_arc: float = 0.45  # peak height of the lob above the straight line, in screen heights
+    grenade_arc: float = 0.45
 
 
 @dataclass
 class DisplayConfig:
     enabled: bool = True
-    backend: str = "gl"  # "gl" = pyglet/OpenGL (~2.3 ms/frame) or "cv" (~16 ms/frame on macOS)
-    vsync: bool = False  # vsync removes tearing but blocks up to one refresh (~16 ms at 60 Hz)
+    vsync: bool = False
     window_name: str = "HIGH NOON"
-    show_debug: bool = False  # skeleton, face boxes, signal readouts, timings (toggle with "d")
-    background: bool = True  # replace the real background using the segmentation mask
+    show_debug: bool = False
+    background: bool = True
 
 
 @dataclass
@@ -143,5 +89,5 @@ class Config:
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     game: GameConfig = field(default_factory=GameConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
-    metrics_csv: Path | None = None  # per-frame timings for the report
-    max_frames: int | None = None  # stop after N displayed frames (benchmarks)
+    metrics_csv: Path | None = None
+    max_frames: int | None = None

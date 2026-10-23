@@ -9,8 +9,8 @@ W, H = 1280, 720
 
 def pose_at(x: float, y: float = 360.0) -> PoseObservation:
     kp = np.tile(np.array([x, y], np.float32), (33, 1))
-    kp[0] = (x, y - 150)  # nose above the torso
-    return PoseObservation(kp, np.ones(33, np.float32), np.zeros((33, 3), np.float32))
+    kp[0] = (x, y - 150)
+    return PoseObservation(kp, np.ones(33, np.float32))
 
 
 def face_at(x: float, y: float) -> FaceObservation:
@@ -44,13 +44,13 @@ def test_identity_kept_through_short_loss_and_released_after_timeout():
     cfg = TrackingConfig(lost_timeout_s=1.0)
     tr = IdentityTracker(cfg)
     tr.update(perception(0.0, [pose_at(300), pose_at(900)]))
-    tr.update(perception(0.5, [pose_at(300)]))  # player 2 occluded
+    tr.update(perception(0.5, [pose_at(300)]))
     players = tr.update(perception(0.8, [pose_at(300), pose_at(880)]))
     assert ids_by_x(players) == {1: 300, 2: 880}
     assert tr.reassigned == set()
 
     tr.update(perception(1.0, [pose_at(300)]))
-    tr.update(perception(2.5, [pose_at(300)]))  # player 2 gone > timeout -> slot released
+    tr.update(perception(2.5, [pose_at(300)]))
     tr.update(perception(2.6, [pose_at(300), pose_at(700)]))
     assert 2 in tr.reassigned
 

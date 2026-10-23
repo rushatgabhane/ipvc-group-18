@@ -1,11 +1,3 @@
-"""Record a raw (unmirrored) webcam clip for repeatable tests and benchmarks.
-
-    python tools/record.py clips/crossing.mp4 --seconds 20
-
-Replay it through the full pipeline with:
-    python -m highnoon --source clips/crossing.mp4 --metrics-csv results/crossing.csv
-"""
-
 from __future__ import annotations
 
 import argparse

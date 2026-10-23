@@ -25,7 +25,7 @@ def test_reduces_jitter_on_static_signal():
 def test_beta_reduces_lag_on_fast_motion():
     def lag(beta):
         f = OneEuroFilter(min_cutoff=1.0, beta=beta)
-        for i in range(60):  # ramp at 600 px/s
+        for i in range(60):
             y = f(np.array([[i * 20.0, 0.0]]), i / 30)
         return 59 * 20.0 - y[0, 0]
 

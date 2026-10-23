@@ -1,11 +1,3 @@
-"""Frame sources.
-
-CameraSource grabs on a background thread and keeps only the newest frame. A consumer
-that falls behind therefore skips stale frames instead of building up a queue, so latency
-stays bounded by one frame. VideoFileSource reads sequentially (no dropping), which makes
-recorded test clips give repeatable results.
-"""
-
 from __future__ import annotations
 
 import threading
@@ -22,7 +14,6 @@ class FrameSource:
     def start(self) -> None: ...
 
     def read(self, after_id: int, timeout: float = 1.0) -> Frame | None:
-        """Return the newest frame with id > after_id, or None on timeout / end of stream."""
         raise NotImplementedError
 
     @property
@@ -49,20 +40,20 @@ class CameraSource(FrameSource):
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.height)
         self.cap.set(cv2.CAP_PROP_FPS, cfg.fps)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # ignored by some backends; the thread drains anyway
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self._latest: Frame | None = None
         self._cond = threading.Condition()
         self._running = False
         self._failed = False
-        self._thread = threading.Thread(target=self._loop, name="capture", daemon=True)
+        self._thread = threading.Thread(target=self._capture_loop, name="capture", daemon=True)
 
     def start(self) -> None:
         self._running = True
         self._thread.start()
 
-    def _loop(self) -> None:
+    def _capture_loop(self) -> None:
         frame_id = 0
-        last_ts = -1
+        last_timestamp = -1
         while self._running:
             ok, image = self.cap.read()
             t = time.perf_counter()
@@ -74,21 +65,18 @@ class CameraSource(FrameSource):
             if self.cfg.mirror:
                 image = cv2.flip(image, 1)
             frame_id += 1
-            ts = max(int(t * 1000), last_ts + 1)  # MediaPipe needs strictly increasing timestamps
-            last_ts = ts
+            last_timestamp = max(int(t * 1000), last_timestamp + 1)
             with self._cond:
-                self._latest = Frame(frame_id, image, t, ts)
+                self._latest = Frame(frame_id, image, t, last_timestamp)
                 self._cond.notify_all()
+
+    def _has_newer(self, after_id: int) -> bool:
+        return self._latest is not None and self._latest.id > after_id
 
     def read(self, after_id: int, timeout: float = 1.0) -> Frame | None:
         with self._cond:
-            self._cond.wait_for(
-                lambda: self._failed or (self._latest is not None and self._latest.id > after_id),
-                timeout,
-            )
-            if self._latest is not None and self._latest.id > after_id:
-                return self._latest
-            return None
+            self._cond.wait_for(lambda: self._failed or self._has_newer(after_id), timeout)
+            return self._latest if self._has_newer(after_id) else None
 
     @property
     def ended(self) -> bool:
@@ -118,23 +106,29 @@ class VideoFileSource(FrameSource):
 
     def read(self, after_id: int, timeout: float = 1.0) -> Frame | None:
         with self._lock:
-            ok, image = self.cap.read()
-            if not ok and self.cfg.loop:
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                ok, image = self.cap.read()
+            ok, image = self._read_next()
             if not ok:
                 self._ended = True
                 return None
             self._index += 1
             if self.cfg.realtime:
-                due = self._t_start + self._index / self.fps
-                delay = due - time.perf_counter()
-                if delay > 0:
-                    time.sleep(delay)
+                self._wait_until_due()
             if self.cfg.mirror:
                 image = cv2.flip(image, 1)
-            ts = int(self._index * 1000 / self.fps)
-            return Frame(self._index, image, time.perf_counter(), ts)
+            timestamp_ms = int(self._index * 1000 / self.fps)
+            return Frame(self._index, image, time.perf_counter(), timestamp_ms)
+
+    def _read_next(self):
+        ok, image = self.cap.read()
+        if not ok and self.cfg.loop:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ok, image = self.cap.read()
+        return ok, image
+
+    def _wait_until_due(self) -> None:
+        delay = self._t_start + self._index / self.fps - time.perf_counter()
+        if delay > 0:
+            time.sleep(delay)
 
     @property
     def ended(self) -> bool:

@@ -1,51 +1,52 @@
-"""2D ray casting for shots. Rays are origin + s * direction with unit direction and s >= 0."""
-
 from __future__ import annotations
 
 import numpy as np
 
-
-def ray_circle(origin: np.ndarray, direction: np.ndarray, center: np.ndarray, radius: float) -> float | None:
-    """Distance along the ray to the first intersection with a circle, or None."""
-    oc = origin - center
-    b = float(np.dot(oc, direction))
-    c = float(np.dot(oc, oc)) - radius * radius
-    disc = b * b - c
-    if disc < 0:
-        return None
-    root = np.sqrt(disc)
-    for s in (-b - root, -b + root):
-        if s >= 0:
-            return float(s)
-    return None
+MISS = np.inf
 
 
-def ray_polygon(origin: np.ndarray, direction: np.ndarray, polygon: np.ndarray) -> float | None:
-    """Distance along the ray to the first crossing of a polygon edge, or None.
+def cross(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
 
-    If the origin is already inside, returns 0. Works for any simple polygon (N, 2).
-    """
-    best = None
-    inside = False
-    n = len(polygon)
-    for i in range(n):
-        a, b = polygon[i], polygon[(i + 1) % n]
-        # Even-odd rule for the inside test.
-        if (a[1] > origin[1]) != (b[1] > origin[1]):
-            x_cross = a[0] + (origin[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1])
-            if origin[0] < x_cross:
-                inside = not inside
-        # Solve origin + s*d = a + u*(b - a).
-        edge = b - a
-        denom = direction[0] * edge[1] - direction[1] * edge[0]
-        if abs(denom) < 1e-9:
-            continue
-        diff = a - origin
-        s = (diff[0] * edge[1] - diff[1] * edge[0]) / denom
-        u = (diff[0] * direction[1] - diff[1] * direction[0]) / denom
-        if s >= 0 and 0 <= u <= 1 and (best is None or s < best):
-            best = float(s)
-    return 0.0 if inside else best
+
+def segment_circle_hits(
+    starts: np.ndarray, ends: np.ndarray, center: np.ndarray, radius: float
+) -> np.ndarray:
+    delta = ends - starts
+    offset = starts - center
+    a = np.einsum("ij,ij->i", delta, delta)
+    b = 2 * np.einsum("ij,ij->i", offset, delta)
+    c = np.einsum("ij,ij->i", offset, offset) - radius * radius
+    discriminant = b * b - 4 * a * c
+    root = np.sqrt(np.maximum(discriminant, 0.0))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        entry = (-b - root) / (2 * a)
+    hits = (discriminant >= 0) & (entry >= 0) & (entry <= 1)
+    return np.where(c <= 0, 0.0, np.where(hits, entry, MISS))
+
+
+def points_in_polygon(points: np.ndarray, polygon: np.ndarray) -> np.ndarray:
+    a, b = polygon[None, :, :], np.roll(polygon, -1, axis=0)[None, :, :]
+    x, y = points[:, None, 0], points[:, None, 1]
+    straddles = (a[..., 1] > y) != (b[..., 1] > y)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        x_cross = a[..., 0] + (y - a[..., 1]) * (b[..., 0] - a[..., 0]) / (b[..., 1] - a[..., 1])
+    return np.count_nonzero(straddles & (x < x_cross), axis=1) % 2 == 1
+
+
+def segment_polygon_hits(starts: np.ndarray, ends: np.ndarray, polygon: np.ndarray) -> np.ndarray:
+    edge_starts = polygon[None, :, :]
+    edges = (np.roll(polygon, -1, axis=0) - polygon)[None, :, :]
+    deltas = (ends - starts)[:, None, :]
+    offsets = edge_starts - starts[:, None, :]
+    denominator = cross(deltas, edges)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        along_segment = cross(offsets, edges) / denominator
+        along_edge = cross(offsets, deltas) / denominator
+    crosses = (np.abs(denominator) > 1e-9) & (along_segment >= 0) & (along_segment <= 1)
+    crosses &= (along_edge >= 0) & (along_edge <= 1)
+    first = np.where(crosses, along_segment, MISS).min(axis=1)
+    return np.where(points_in_polygon(starts, polygon), 0.0, first)
 
 
 def rect_polygon(x0: float, y0: float, x1: float, y1: float) -> np.ndarray:
@@ -53,12 +54,12 @@ def rect_polygon(x0: float, y0: float, x1: float, y1: float) -> np.ndarray:
 
 
 def ray_exit_distance(origin: np.ndarray, direction: np.ndarray, width: int, height: int) -> float:
-    """Distance along the ray until it leaves the image."""
-    limits = []
-    for axis, size in ((0, width), (1, height)):
-        d = direction[axis]
-        if d > 1e-9:
-            limits.append((size - origin[axis]) / d)
-        elif d < -1e-9:
-            limits.append(-origin[axis] / d)
-    return float(max(0.0, min(limits))) if limits else 0.0
+    size = np.array([width, height], np.float32)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        limits = np.where(
+            direction > 1e-9,
+            (size - origin) / direction,
+            np.where(direction < -1e-9, -origin / direction, MISS),
+        )
+    nearest = float(limits.min())
+    return max(0.0, nearest) if np.isfinite(nearest) else 0.0

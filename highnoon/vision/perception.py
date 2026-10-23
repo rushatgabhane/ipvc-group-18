@@ -1,21 +1,3 @@
-"""Model inference (T1 face + T2 pose), run on a dedicated thread.
-
-Performance design (numbers from an M1 Pro, CPU; see docs/PERFORMANCE.md):
-  * Pose (25 ms) and face (11 ms) run in parallel on two threads. MediaPipe releases the
-    GIL inside its C++ graph, so this measured 36.7 ms -> 25.7 ms.
-  * The whole worker runs beside the main thread. While frame N is rendered, frame N+1
-    is already being inferred, so throughput is set by the slowest stage, not their sum.
-  * Full resolution is passed in. Downscaling to 0.5x gave no speedup (the models resize
-    internally) and would only hurt small faces far from the camera.
-  * The person segmentation mask comes out of the pose graph for ~0.3 ms extra, so no
-    separate segmentation model is needed for background replacement (T5).
-  * Hands (fist trigger) cost ~15 ms *per hand* (31 ms for two), more than pose. They run
-    on their own thread at whatever rate they manage; each frame takes the newest finished
-    hand result (1-2 frames old) instead of waiting, so hands never lower the frame rate.
-  * CPU or GPU is chosen by vision/delegate.py: on Windows/Linux the GPU is used when a probe
-    shows it works. The GPU delegate aborts the process on macOS, so macOS stays on CPU.
-"""
-
 from __future__ import annotations
 
 import threading
@@ -32,140 +14,127 @@ from highnoon.contracts import FaceObservation, Frame, HandObservation, Percepti
 from highnoon.core.capture import FrameSource
 from highnoon.vision.delegate import resolve_delegate
 
+FINGERTIPS = [8, 12, 16, 20]
+WRIST, MIDDLE_KNUCKLE = 0, 9
+
 
 class Perceiver:
-    """Synchronous inference on one frame. Owns the MediaPipe graphs."""
-
     def __init__(self, cfg: PerceptionConfig):
         self.cfg = cfg
-        paths = [cfg.pose_model_path]
-        paths += [cfg.face_model_path] if cfg.run_face else []
-        paths += [cfg.hand_model_path] if cfg.run_hands else []
-        for path in paths:
+        for path in (cfg.pose_model_path, cfg.face_model_path, cfg.hand_model_path):
             if not path.exists():
                 raise FileNotFoundError(f"{path} missing - run: python tools/download_models.py")
-        self.delegate = resolve_delegate(cfg)
-
-        self.pose = vision.PoseLandmarker.create_from_options(
-            vision.PoseLandmarkerOptions(
-                base_options=BaseOptions(model_asset_path=str(cfg.pose_model_path), delegate=self.delegate),
-                running_mode=vision.RunningMode.VIDEO,
-                num_poses=cfg.max_players,
-                min_pose_detection_confidence=cfg.min_detection_confidence,
-                min_pose_presence_confidence=cfg.min_presence_confidence,
-                min_tracking_confidence=cfg.min_tracking_confidence,
-                output_segmentation_masks=cfg.segmentation,
-            )
-        )
-        self.face = None
-        if cfg.run_face:
-            self.face = vision.FaceLandmarker.create_from_options(
-                vision.FaceLandmarkerOptions(
-                    base_options=BaseOptions(
-                        model_asset_path=str(cfg.face_model_path), delegate=self.delegate
-                    ),
-                    running_mode=vision.RunningMode.VIDEO,
-                    num_faces=cfg.max_players,
-                    min_face_detection_confidence=cfg.min_detection_confidence,
-                    min_face_presence_confidence=cfg.min_presence_confidence,
-                    min_tracking_confidence=cfg.min_tracking_confidence,
-                )
-            )
-        self.hands = None
-        if cfg.run_hands:
-            landmarker = vision.HandLandmarker.create_from_options(
-                vision.HandLandmarkerOptions(
-                    base_options=BaseOptions(
-                        model_asset_path=str(cfg.hand_model_path), delegate=self.delegate
-                    ),
-                    running_mode=vision.RunningMode.VIDEO,
-                    num_hands=cfg.max_hands,
-                    min_hand_detection_confidence=cfg.min_detection_confidence,
-                    min_hand_presence_confidence=cfg.min_presence_confidence,
-                    min_tracking_confidence=cfg.min_tracking_confidence,
-                )
-            )
-            self.hands = HandWorker(landmarker, run_async=cfg.hands_async)
-        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="infer") if cfg.parallel else None
+        delegate = resolve_delegate(cfg)
+        self.pose = create_pose_landmarker(cfg, delegate)
+        self.face = create_face_landmarker(cfg, delegate)
+        self.hands = HandWorker(create_hand_landmarker(cfg, delegate))
+        self._pose_thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pose")
 
     def __call__(self, frame: Frame) -> Perception:
         timings: dict[str, float] = {}
         t0 = time.perf_counter()
-        rgb = cv2.cvtColor(frame.image, cv2.COLOR_BGR2RGB)
-        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        timings["convert"] = (time.perf_counter() - t0) * 1000
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(frame.image, cv2.COLOR_BGR2RGB))
+        timings["convert"] = elapsed_ms(t0)
+        self.hands.submit(frame, image)
 
-        def timed(name, fn):
-            t = time.perf_counter()
-            result = fn(image, frame.timestamp_ms)
-            timings[name] = (time.perf_counter() - t) * 1000
+        def detect(name, landmarker):
+            started = time.perf_counter()
+            result = landmarker.detect_for_video(image, frame.timestamp_ms)
+            timings[name] = elapsed_ms(started)
             return result
 
-        if self.hands is not None:
-            self.hands.submit(frame, image)  # async: returns immediately
-
         t_infer = time.perf_counter()
-        if self._pool is not None and self.face is not None:
-            pose_future = self._pool.submit(timed, "pose", self.pose.detect_for_video)
-            face_result = timed("face", self.face.detect_for_video)
-            pose_result = pose_future.result()
-        else:
-            pose_result = timed("pose", self.pose.detect_for_video)
-            face_result = timed("face", self.face.detect_for_video) if self.face is not None else None
-        timings["inference"] = (time.perf_counter() - t_infer) * 1000
+        pose_future = self._pose_thread.submit(detect, "pose", self.pose)
+        face_result = detect("face", self.face)
+        pose_result = pose_future.result()
+        timings["inference"] = elapsed_ms(t_infer)
 
         t_post = time.perf_counter()
-        w, h = frame.size
-        poses = _convert_poses(pose_result, w, h)
-        faces = _convert_faces(face_result, w, h) if face_result is not None else []
-        mask = _merge_masks(pose_result) if self.cfg.segmentation else None
-        hands: list[HandObservation] = []
-        if self.hands is not None:
-            hands, hand_ms = self.hands.latest()
-            timings["hand"] = hand_ms
-            timings["hand_lag"] = float(frame.id - hands[0].frame_id) if hands else 0.0
-        timings["postprocess"] = (time.perf_counter() - t_post) * 1000
+        width, height = frame.size
+        poses = convert_poses(pose_result, width, height)
+        faces = convert_faces(face_result, width, height)
+        mask = merge_person_masks(pose_result)
+        hands, timings["hand"] = self.hands.latest()
+        timings["hand_lag"] = float(frame.id - hands[0].frame_id) if hands else 0.0
+        timings["postprocess"] = elapsed_ms(t_post)
         return Perception(frame, poses, faces, mask, time.perf_counter(), timings, hands)
 
     def close(self) -> None:
-        if self._pool is not None:
-            self._pool.shutdown(wait=True)
-        if self.hands is not None:
-            self.hands.close()
+        self._pose_thread.shutdown(wait=True)
+        self.hands.close()
         self.pose.close()
-        if self.face is not None:
-            self.face.close()
+        self.face.close()
+
+
+def elapsed_ms(start: float) -> float:
+    return (time.perf_counter() - start) * 1000
+
+
+def base_options(path, delegate) -> BaseOptions:
+    return BaseOptions(model_asset_path=str(path), delegate=delegate)
+
+
+def create_pose_landmarker(cfg: PerceptionConfig, delegate):
+    return vision.PoseLandmarker.create_from_options(
+        vision.PoseLandmarkerOptions(
+            base_options=base_options(cfg.pose_model_path, delegate),
+            running_mode=vision.RunningMode.VIDEO,
+            num_poses=cfg.max_players,
+            min_pose_detection_confidence=cfg.min_detection_confidence,
+            min_pose_presence_confidence=cfg.min_presence_confidence,
+            min_tracking_confidence=cfg.min_tracking_confidence,
+            output_segmentation_masks=True,
+        )
+    )
+
+
+def create_face_landmarker(cfg: PerceptionConfig, delegate):
+    return vision.FaceLandmarker.create_from_options(
+        vision.FaceLandmarkerOptions(
+            base_options=base_options(cfg.face_model_path, delegate),
+            running_mode=vision.RunningMode.VIDEO,
+            num_faces=cfg.max_players,
+            min_face_detection_confidence=cfg.min_detection_confidence,
+            min_face_presence_confidence=cfg.min_presence_confidence,
+            min_tracking_confidence=cfg.min_tracking_confidence,
+        )
+    )
+
+
+def create_hand_landmarker(cfg: PerceptionConfig, delegate):
+    return vision.HandLandmarker.create_from_options(
+        vision.HandLandmarkerOptions(
+            base_options=base_options(cfg.hand_model_path, delegate),
+            running_mode=vision.RunningMode.VIDEO,
+            num_hands=cfg.max_hands,
+            min_hand_detection_confidence=cfg.min_detection_confidence,
+            min_hand_presence_confidence=cfg.min_presence_confidence,
+            min_tracking_confidence=cfg.min_tracking_confidence,
+        )
+    )
 
 
 class HandWorker:
-    """Hand landmarks on a separate thread, always on the newest submitted frame."""
-
-    def __init__(self, landmarker, run_async: bool = True):
+    def __init__(self, landmarker):
         self.landmarker = landmarker
-        self.run_async = run_async
         self._pending: tuple[Frame, mp.Image] | None = None
         self._result: list[HandObservation] = []
         self._ms = 0.0
         self._cond = threading.Condition()
         self._running = True
-        self._thread = None
-        if run_async:
-            self._thread = threading.Thread(target=self._loop, name="hands", daemon=True)
-            self._thread.start()
+        self._thread = threading.Thread(target=self._detect_loop, name="hands", daemon=True)
+        self._thread.start()
 
     def submit(self, frame: Frame, image: mp.Image) -> None:
-        if not self.run_async:
-            self._process(frame, image)
-            return
         with self._cond:
-            self._pending = (frame, image)  # replaces an unprocessed older frame
+            self._pending = (frame, image)
             self._cond.notify()
 
     def latest(self) -> tuple[list[HandObservation], float]:
         with self._cond:
             return self._result, self._ms
 
-    def _loop(self) -> None:
+    def _detect_loop(self) -> None:
         while True:
             with self._cond:
                 self._cond.wait_for(lambda: self._pending is not None or not self._running)
@@ -173,28 +142,22 @@ class HandWorker:
                     return
                 frame, image = self._pending
                 self._pending = None
-            self._process(frame, image)
-
-    def _process(self, frame: Frame, image: mp.Image) -> None:
-        t = time.perf_counter()
-        result = self.landmarker.detect_for_video(image, frame.timestamp_ms)
-        hands = _convert_hands(result, *frame.size, frame.id)
-        with self._cond:
-            self._result = hands
-            self._ms = (time.perf_counter() - t) * 1000
+            started = time.perf_counter()
+            result = self.landmarker.detect_for_video(image, frame.timestamp_ms)
+            hands = convert_hands(result, *frame.size, frame.id)
+            with self._cond:
+                self._result = hands
+                self._ms = elapsed_ms(started)
 
     def close(self) -> None:
         with self._cond:
             self._running = False
             self._cond.notify_all()
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
+        self._thread.join(timeout=2.0)
         self.landmarker.close()
 
 
 class PerceptionWorker:
-    """Runs a Perceiver on its own thread, always on the newest available frame."""
-
     def __init__(self, source: FrameSource, perceiver: Perceiver):
         self.source = source
         self.perceiver = perceiver
@@ -203,13 +166,13 @@ class PerceptionWorker:
         self._running = False
         self._error: BaseException | None = None
         self._finished = False
-        self._thread = threading.Thread(target=self._loop, name="perception", daemon=True)
+        self._thread = threading.Thread(target=self._perceive_loop, name="perception", daemon=True)
 
     def start(self) -> None:
         self._running = True
         self._thread.start()
 
-    def _loop(self) -> None:
+    def _perceive_loop(self) -> None:
         last_id = 0
         try:
             while self._running:
@@ -223,25 +186,22 @@ class PerceptionWorker:
                 with self._cond:
                     self._latest = result
                     self._cond.notify_all()
-        except BaseException as e:  # surface model errors on the main thread
-            self._error = e
+        except BaseException as error:
+            self._error = error
         finally:
             with self._cond:
                 self._finished = True
                 self._cond.notify_all()
 
+    def _has_newer(self, after_id: int) -> bool:
+        return self._latest is not None and self._latest.frame.id > after_id
+
     def get(self, after_id: int, timeout: float = 1.0) -> Perception | None:
-        """Newest result for a frame with id > after_id. None on timeout or when finished."""
         with self._cond:
-            self._cond.wait_for(
-                lambda: self._finished or (self._latest is not None and self._latest.frame.id > after_id),
-                timeout,
-            )
+            self._cond.wait_for(lambda: self._finished or self._has_newer(after_id), timeout)
             if self._error is not None:
                 raise RuntimeError("perception thread failed") from self._error
-            if self._latest is not None and self._latest.frame.id > after_id:
-                return self._latest
-            return None
+            return self._latest if self._has_newer(after_id) else None
 
     @property
     def finished(self) -> bool:
@@ -254,57 +214,47 @@ class PerceptionWorker:
         self.perceiver.close()
 
 
-def _convert_poses(result, w: int, h: int) -> list[PoseObservation]:
-    poses = []
-    scale = np.array([w, h], np.float32)
-    for i, landmarks in enumerate(result.pose_landmarks):
-        arr = np.array([(lm.x, lm.y, lm.visibility) for lm in landmarks], np.float32)
-        world = np.array([(lm.x, lm.y, lm.z) for lm in result.pose_world_landmarks[i]], np.float32)
-        poses.append(PoseObservation(arr[:, :2] * scale, arr[:, 2], world))
-    return poses
+def to_pixels(landmarks, width: int, height: int) -> np.ndarray:
+    return np.array([(lm.x, lm.y) for lm in landmarks], np.float32) * np.array([width, height], np.float32)
 
 
-def _convert_faces(result, w: int, h: int) -> list[FaceObservation]:
+def convert_poses(result, width: int, height: int) -> list[PoseObservation]:
+    return [
+        PoseObservation(
+            to_pixels(landmarks, width, height), np.array([lm.visibility for lm in landmarks], np.float32)
+        )
+        for landmarks in result.pose_landmarks
+    ]
+
+
+def convert_faces(result, width: int, height: int) -> list[FaceObservation]:
     faces = []
-    scale = np.array([w, h], np.float32)
     for landmarks in result.face_landmarks:
-        pts = np.array([(lm.x, lm.y) for lm in landmarks], np.float32) * scale
-        bbox = np.concatenate([pts.min(axis=0), pts.max(axis=0)])
-        faces.append(FaceObservation(pts, bbox))
+        points = to_pixels(landmarks, width, height)
+        faces.append(FaceObservation(points, np.concatenate([points.min(axis=0), points.max(axis=0)])))
     return faces
 
 
-FINGERTIPS = [8, 12, 16, 20]  # index, middle, ring, pinky (the thumb folds sideways, so it is left out)
-WRIST, MIDDLE_MCP = 0, 9
-
-
 def hand_openness(world: np.ndarray) -> float:
-    """Fingertip reach relative to palm size, from 3D world landmarks (view-independent).
-
-    Scale-free, so it works for any hand size and distance: ~1.9 for an open hand, ~0.9 for a fist.
-    """
-    palm = float(np.linalg.norm(world[MIDDLE_MCP] - world[WRIST]))
+    palm = float(np.linalg.norm(world[MIDDLE_KNUCKLE] - world[WRIST]))
     if palm < 1e-6:
         return 0.0
     return float(np.linalg.norm(world[FINGERTIPS] - world[WRIST], axis=1).mean()) / palm
 
 
-def _convert_hands(result, w: int, h: int, frame_id: int) -> list[HandObservation]:
+def convert_hands(result, width: int, height: int, frame_id: int) -> list[HandObservation]:
     hands = []
-    scale = np.array([w, h], np.float32)
-    for i, landmarks in enumerate(result.hand_landmarks):
-        pts = np.array([(lm.x, lm.y) for lm in landmarks], np.float32) * scale
-        world = np.array([(lm.x, lm.y, lm.z) for lm in result.hand_world_landmarks[i]], np.float32)
-        hands.append(HandObservation(pts, world, hand_openness(world), frame_id))
+    for landmarks, world_landmarks in zip(result.hand_landmarks, result.hand_world_landmarks, strict=True):
+        world = np.array([(lm.x, lm.y, lm.z) for lm in world_landmarks], np.float32)
+        hands.append(HandObservation(to_pixels(landmarks, width, height), hand_openness(world), frame_id))
     return hands
 
 
-def _merge_masks(result) -> np.ndarray | None:
+def merge_person_masks(result) -> np.ndarray | None:
     masks = result.segmentation_masks
     if not masks:
         return None
     merged = masks[0].numpy_view()
-    for m in masks[1:]:
-        merged = np.maximum(merged, m.numpy_view())
-    # Copy: the view points into MediaPipe-owned memory that is freed with the result.
+    for mask in masks[1:]:
+        merged = np.maximum(merged, mask.numpy_view())
     return np.array(merged.squeeze(), dtype=np.float32)

@@ -1,17 +1,7 @@
-"""T2: turns raw keypoints into smooth, stable per-player signals.
-
-Filters are keyed by player id, so they need T3's identities. When a slot gets a new
-identity, its filter is reset so a newcomer's pose is not blended with the previous one.
-Keypoints below `min_visibility` are frozen at their last filtered value instead of
-following noisy guesses.
-
-Signals are expressed relative to the player's torso length where possible, so thresholds
-work the same whether a player stands 1.5 m or 3 m from the camera.
-"""
-
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -19,136 +9,153 @@ from highnoon.config import FilterConfig
 from highnoon.contracts import MotionSignals, Player
 from highnoon.core.filters import OneEuroFilter
 
+NOSE = 0
 L_SHOULDER, R_SHOULDER, L_ELBOW, R_ELBOW, L_WRIST, R_WRIST = 11, 12, 13, 14, 15, 16
 L_HIP, R_HIP = 23, 24
 ARMS = ((L_SHOULDER, L_ELBOW, L_WRIST), (R_SHOULDER, R_ELBOW, R_WRIST))
+RIGHT_ARM = 1
 
-STRAIGHT_ARM = 0.8  # shoulder-wrist distance (torso lengths) above which the arm counts as straight
-MIN_FOREARM = 0.3  # shorter forearms are pointing at the camera (foreshortened) and give no direction
+STRAIGHT_ARM_REACH = 0.8
+MIN_FOREARM_LENGTH = 0.3
 ELEVATION_RANGE = (math.radians(-50), math.radians(80))
-SHOULDERS_PER_TORSO = 0.8  # typical shoulder width / torso length, used when the hips are out of frame
-ARMS_DOWN_DROP = 0.75  # wrists this many torso lengths below the shoulders = gun lowered
-# Extra smoothing on the aim angle (rad). The laser amplifies angular jitter over its whole
-# length, so it needs more smoothing than the keypoints themselves: steady when held still,
-# but beta lets fast swings through with little lag.
-AIM_MIN_CUTOFF = 0.8  # Hz
-AIM_BETA = 0.6  # per rad/s
+SHOULDER_WIDTH_PER_TORSO = 0.8
+DEFAULT_TORSO_PX = 200.0
+AIM_MIN_CUTOFF = 0.8
+AIM_BETA = 0.6
+
+
+@dataclass
+class ArmAim:
+    direction: np.ndarray
+    elevation: float
+    extension: float
+    valid: bool
+
+
+@dataclass
+class SmoothedAim:
+    arm: int
+    angle_filter: OneEuroFilter
+    angle: float
 
 
 class MotionFilter:
     def __init__(self, cfg: FilterConfig):
         self.cfg = cfg
-        self._filters: dict[int, OneEuroFilter] = {}
-        self._aim_arm: dict[int, int] = {}
-        self._scale: dict[int, float] = {}
-        self._aim: dict[int, tuple[int, OneEuroFilter, float]] = {}  # id -> (arm, filter, last angle)
-
-    def _filter(self, player_id: int) -> OneEuroFilter:
-        f = self._filters.get(player_id)
-        if f is None:
-            f = OneEuroFilter(self.cfg.min_cutoff, self.cfg.beta, self.cfg.d_cutoff)
-            self._filters[player_id] = f
-        return f
+        self._keypoint_filters: dict[int, OneEuroFilter] = {}
+        self._aiming_arm: dict[int, int] = {}
+        self._torso_len: dict[int, float] = {}
+        self._aim: dict[int, SmoothedAim] = {}
 
     def update(self, players: list[Player], t: float, reassigned: set[int]) -> None:
-        for p in players:
-            f = self._filter(p.id)
-            if p.id in reassigned:
-                f.reset()
-                self._aim_arm.pop(p.id, None)
-                self._scale.pop(p.id, None)
-                self._aim.pop(p.id, None)
-            if p.pose is None:
-                p.signals = None
+        for player in players:
+            if player.id in reassigned:
+                self._forget(player.id)
+            if player.pose is None:
+                player.signals = None
                 continue
-            reliable = p.pose.visibility >= self.cfg.min_visibility
-            p.smoothed = f(p.pose.keypoints, t, mask=reliable)
-            p.signals = self._signals(p.id, p.smoothed, reliable)
-            hand = p.hands.get(ARMS[self._aim_arm[p.id]][2])
-            p.signals.hand_openness = hand.openness if hand is not None else None
-            p.signals.head_y = (
-                float((p.face.bbox[1] + p.face.bbox[3]) / 2)
-                if p.face is not None
-                else float(p.smoothed[0][1])
-            )
-            self._smooth_aim(p.id, p.signals, t)
+            reliable = player.pose.visibility >= self.cfg.min_visibility
+            player.smoothed = self._keypoint_filter(player.id)(player.pose.keypoints, t, mask=reliable)
+            player.signals = self._signals(player.id, player.smoothed, reliable)
+            player.signals.hand_openness = self._aiming_hand_openness(player)
+            player.signals.head_y = head_height(player)
+            self._smooth_aim(player.id, player.signals, t)
 
-    def _smooth_aim(self, player_id: int, sig: MotionSignals, t: float) -> None:
-        """Filter the aim direction's angle. `elevation` stays raw for the flick trigger."""
-        if not sig.aim_valid:
+    def _forget(self, player_id: int) -> None:
+        self._keypoint_filter(player_id).reset()
+        self._aiming_arm.pop(player_id, None)
+        self._torso_len.pop(player_id, None)
+        self._aim.pop(player_id, None)
+
+    def _keypoint_filter(self, player_id: int) -> OneEuroFilter:
+        if player_id not in self._keypoint_filters:
+            cfg = self.cfg
+            self._keypoint_filters[player_id] = OneEuroFilter(cfg.min_cutoff, cfg.beta, cfg.d_cutoff)
+        return self._keypoint_filters[player_id]
+
+    def _aiming_hand_openness(self, player: Player) -> float | None:
+        wrist = ARMS[self._aiming_arm[player.id]][2]
+        hand = player.hands.get(wrist)
+        return hand.openness if hand is not None else None
+
+    def _smooth_aim(self, player_id: int, signals: MotionSignals, t: float) -> None:
+        if not signals.aim_valid:
             self._aim.pop(player_id, None)
             return
-        arm = self._aim_arm[player_id]
-        angle = math.atan2(float(sig.aim_dir[1]), float(sig.aim_dir[0]))
-        entry = self._aim.get(player_id)
-        if entry is None or entry[0] != arm:  # new aim or switched arm: start fresh, no blending
-            entry = (arm, OneEuroFilter(AIM_MIN_CUTOFF, AIM_BETA, 1.0), angle)
-        _, filt, last = entry
-        angle = last + math.remainder(angle - last, math.tau)  # unwrap across +-pi
-        smoothed = float(filt(np.array([angle], np.float32), t)[0])
-        self._aim[player_id] = (arm, filt, smoothed)
-        sig.aim_dir = np.array([math.cos(smoothed), math.sin(smoothed)], np.float32)
+        arm = self._aiming_arm[player_id]
+        raw_angle = math.atan2(float(signals.aim_dir[1]), float(signals.aim_dir[0]))
+        aim = self._aim.get(player_id)
+        if aim is None or aim.arm != arm:
+            aim = SmoothedAim(arm, OneEuroFilter(AIM_MIN_CUTOFF, AIM_BETA, 1.0), raw_angle)
+        unwrapped = aim.angle + math.remainder(raw_angle - aim.angle, math.tau)
+        aim.angle = float(aim.angle_filter(np.array([unwrapped], np.float32), t)[0])
+        self._aim[player_id] = aim
+        signals.aim_dir = np.array([math.cos(aim.angle), math.sin(aim.angle)], np.float32)
 
-    def _signals(self, player_id: int, kp: np.ndarray, reliable: np.ndarray) -> MotionSignals:
-        shoulder_mid = (kp[L_SHOULDER] + kp[R_SHOULDER]) / 2
-        torso_len = self._body_scale(player_id, kp, reliable, shoulder_mid)
-
-        # Aim ray per arm. A straight arm uses shoulder -> wrist (long baseline, steadiest);
-        # a bent arm, or one whose shoulder is out of frame (sitting close to the camera),
-        # uses the forearm, elbow -> wrist.
-        candidates: list[tuple[np.ndarray, float, float, bool] | None] = []
-        for s, e, w in ARMS:
-            if not (reliable[e] and reliable[w]):
-                candidates.append(None)
-                continue
-            forearm = kp[w] - kp[e]
-            reach = float(np.linalg.norm(kp[w] - kp[s])) / torso_len if reliable[s] else 0.0
-            vec = kp[w] - kp[s] if reach >= STRAIGHT_ARM else forearm
-            norm = float(np.linalg.norm(vec))
-            if norm < 1e-6 or float(np.linalg.norm(forearm)) / torso_len < MIN_FOREARM:
-                candidates.append(None)
-                continue
-            direction = vec / norm
-            elevation = math.atan2(-direction[1], abs(direction[0]))  # image y points down
-            valid = ELEVATION_RANGE[0] <= elevation <= ELEVATION_RANGE[1]
-            extension = reach if reliable[s] else float(np.linalg.norm(forearm)) / torso_len
-            candidates.append((direction, elevation, extension, valid))
-
-        # Keep the current aiming arm while it is valid; switch only when it stops being usable.
-        arm = self._aim_arm.get(player_id, 1)
-        if not (candidates[arm] and candidates[arm][3]) and candidates[1 - arm] and candidates[1 - arm][3]:
-            arm = 1 - arm
-        self._aim_arm[player_id] = arm
-
-        wrist = ARMS[arm][2]
-        if candidates[arm] is not None:
-            direction, elevation, extension, aim_valid = candidates[arm]
-        else:
-            direction, elevation, extension, aim_valid = np.array([1.0, 0.0], np.float32), 0.0, 0.0, False
-
-        drop = ARMS_DOWN_DROP * torso_len
-        arms_down = bool(kp[L_WRIST][1] > shoulder_mid[1] + drop and kp[R_WRIST][1] > shoulder_mid[1] + drop)
+    def _signals(self, player_id: int, keypoints: np.ndarray, reliable: np.ndarray) -> MotionSignals:
+        torso_len = self._estimate_torso_len(player_id, keypoints, reliable)
+        aims = [arm_aim(keypoints, reliable, joints, torso_len) for joints in ARMS]
+        arm = self._choose_aiming_arm(player_id, aims)
+        aim = aims[arm] or ArmAim(np.array([1.0, 0.0], np.float32), 0.0, 0.0, False)
         return MotionSignals(
             torso_len=torso_len,
-            shoulder_y=float(shoulder_mid[1]),
-            aim_valid=aim_valid,
-            extension=extension,
-            aim_origin=kp[wrist].copy(),
-            aim_dir=np.asarray(direction, np.float32),
-            elevation=elevation,
-            arms_down=arms_down,
+            aim_valid=aim.valid,
+            extension=aim.extension,
+            aim_origin=keypoints[ARMS[arm][2]].copy(),
+            aim_dir=np.asarray(aim.direction, np.float32),
+            elevation=aim.elevation,
         )
 
-    def _body_scale(
-        self, player_id: int, kp: np.ndarray, reliable: np.ndarray, shoulder_mid: np.ndarray
-    ) -> float:
-        """Torso length in px: from the hips when visible, else estimated from shoulder width."""
+    def _choose_aiming_arm(self, player_id: int, aims: list[ArmAim | None]) -> int:
+        arm = self._aiming_arm.get(player_id, RIGHT_ARM)
+        other = 1 - arm
+        current_usable = aims[arm] is not None and aims[arm].valid
+        other_usable = aims[other] is not None and aims[other].valid
+        if not current_usable and other_usable:
+            arm = other
+        self._aiming_arm[player_id] = arm
+        return arm
+
+    def _estimate_torso_len(self, player_id: int, keypoints: np.ndarray, reliable: np.ndarray) -> float:
+        shoulder_mid = (keypoints[L_SHOULDER] + keypoints[R_SHOULDER]) / 2
         if reliable[[L_SHOULDER, R_SHOULDER, L_HIP, R_HIP]].all():
-            scale = float(np.linalg.norm((kp[L_HIP] + kp[R_HIP]) / 2 - shoulder_mid))
+            hip_mid = (keypoints[L_HIP] + keypoints[R_HIP]) / 2
+            torso_len = float(np.linalg.norm(hip_mid - shoulder_mid))
         elif reliable[[L_SHOULDER, R_SHOULDER]].all():
-            scale = float(np.linalg.norm(kp[L_SHOULDER] - kp[R_SHOULDER])) / SHOULDERS_PER_TORSO
+            shoulder_width = float(np.linalg.norm(keypoints[L_SHOULDER] - keypoints[R_SHOULDER]))
+            torso_len = shoulder_width / SHOULDER_WIDTH_PER_TORSO
         else:
-            scale = self._scale.get(player_id, 200.0)
-        scale = max(scale, 1.0)
-        self._scale[player_id] = scale
-        return scale
+            torso_len = self._torso_len.get(player_id, DEFAULT_TORSO_PX)
+        torso_len = max(torso_len, 1.0)
+        self._torso_len[player_id] = torso_len
+        return torso_len
+
+
+def arm_aim(
+    keypoints: np.ndarray, reliable: np.ndarray, joints: tuple[int, int, int], torso_len: float
+) -> ArmAim | None:
+    shoulder, elbow, wrist = joints
+    if not (reliable[elbow] and reliable[wrist]):
+        return None
+    forearm = keypoints[wrist] - keypoints[elbow]
+    forearm_len = float(np.linalg.norm(forearm)) / torso_len
+    reach = (
+        float(np.linalg.norm(keypoints[wrist] - keypoints[shoulder])) / torso_len
+        if reliable[shoulder]
+        else 0.0
+    )
+    pointer = keypoints[wrist] - keypoints[shoulder] if reach >= STRAIGHT_ARM_REACH else forearm
+    pointer_len = float(np.linalg.norm(pointer))
+    if pointer_len < 1e-6 or forearm_len < MIN_FOREARM_LENGTH:
+        return None
+    direction = pointer / pointer_len
+    elevation = math.atan2(-direction[1], abs(direction[0]))
+    valid = ELEVATION_RANGE[0] <= elevation <= ELEVATION_RANGE[1]
+    extension = reach if reliable[shoulder] else forearm_len
+    return ArmAim(direction, elevation, extension, valid)
+
+
+def head_height(player: Player) -> float:
+    if player.face is not None:
+        return float((player.face.bbox[1] + player.face.bbox[3]) / 2)
+    return float(player.smoothed[NOSE][1])

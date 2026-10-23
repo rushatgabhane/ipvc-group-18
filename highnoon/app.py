@@ -1,15 +1,3 @@
-"""Main loop.
-
-Threads:
-  capture     camera -> newest frame (core/capture.py)
-  perception  newest frame -> pose + face inference (vision/perception.py)
-  main        identity -> filtering -> game -> render -> display (this file)
-
-The main thread always processes the newest perception result. If it is slower than
-inference, frames are dropped rather than queued, which keeps latency bounded.
-Window/event handling (Cocoa via pyglet or HighGUI) must run on the main thread on macOS.
-"""
-
 from __future__ import annotations
 
 import time
@@ -18,7 +6,7 @@ from highnoon.config import Config
 from highnoon.core.capture import open_source
 from highnoon.core.profiler import Profiler
 from highnoon.game.game import Game
-from highnoon.render.display import open_display
+from highnoon.render.display import Display
 from highnoon.render.renderer import Renderer
 from highnoon.tracking.identity import IdentityTracker
 from highnoon.vision.motion import MotionFilter
@@ -35,30 +23,22 @@ def run(cfg: Config) -> Profiler:
     motion = MotionFilter(cfg.filters)
     renderer = Renderer(cfg.display)
     game = Game(cfg.game, (cfg.capture.width, cfg.capture.height))
-
-    display = None
-    if cfg.display.enabled:
-        size = (cfg.capture.width, cfg.capture.height)
-        display = open_display(cfg.display.backend, cfg.display.window_name, size, cfg.display.vsync)
-        print(KEY_HELP)
+    display = open_display(cfg)
 
     source.start()
     worker.start()
-    last_id = 0
-    frames = 0
+    last_frame_id = 0
+    frames_shown = 0
     try:
         while True:
-            perception = worker.get(last_id, timeout=1.0)
+            perception = worker.get(last_frame_id, timeout=1.0)
             if perception is None:
                 if worker.finished:
                     break
                 continue
             frame = perception.frame
-            # Frames skipped because the pipeline was busy; >0 means we are below camera rate.
-            profiler.add({"dropped": float(max(0, frame.id - last_id - 1)) if last_id else 0.0})
-            last_id = frame.id
-            profiler.add(perception.timings)
-            profiler.add({"wait": (time.perf_counter() - perception.t_done) * 1000})
+            record_pipeline_timings(profiler, perception, last_frame_id)
+            last_frame_id = frame.id
 
             with profiler.stage("tracking"):
                 players = tracker.update(perception)
@@ -72,21 +52,13 @@ def run(cfg: Config) -> Profiler:
 
             if display is not None:
                 with profiler.stage("display"):
-                    keys = display.show(output)
-                if "q" in keys or "esc" in keys:
+                    keys = display.show(output, renderer.shake)
+                if handle_keys(keys, cfg, game, display):
                     break
-                if "d" in keys:
-                    cfg.display.show_debug = not cfg.display.show_debug
-                if "b" in keys:
-                    cfg.display.background = not cfg.display.background
-                if "r" in keys:
-                    game.reset_round()
-                if "f" in keys:
-                    display.toggle_fullscreen()
 
             profiler.end_frame(frame.id, frame.t_capture)
-            frames += 1
-            if cfg.max_frames is not None and frames >= cfg.max_frames:
+            frames_shown += 1
+            if cfg.max_frames is not None and frames_shown >= cfg.max_frames:
                 break
     finally:
         worker.stop()
@@ -95,3 +67,32 @@ def run(cfg: Config) -> Profiler:
         if display is not None:
             display.close()
     return profiler
+
+
+def open_display(cfg: Config) -> Display | None:
+    if not cfg.display.enabled:
+        return None
+    print(KEY_HELP)
+    size = (cfg.capture.width, cfg.capture.height)
+    return Display(cfg.display.window_name, size, cfg.display.vsync)
+
+
+def record_pipeline_timings(profiler: Profiler, perception, last_frame_id: int) -> None:
+    skipped = perception.frame.id - last_frame_id - 1 if last_frame_id else 0
+    profiler.add({"dropped": float(max(0, skipped))})
+    profiler.add(perception.timings)
+    profiler.add({"wait": (time.perf_counter() - perception.t_done) * 1000})
+
+
+def handle_keys(keys: list[str], cfg: Config, game: Game, display: Display) -> bool:
+    if "q" in keys or "esc" in keys:
+        return True
+    if "d" in keys:
+        cfg.display.show_debug = not cfg.display.show_debug
+    if "b" in keys:
+        cfg.display.background = not cfg.display.background
+    if "r" in keys:
+        game.reset_round()
+    if "f" in keys:
+        display.toggle_fullscreen()
+    return False

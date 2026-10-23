@@ -1,138 +1,36 @@
-"""T4: game rules. Turns recognised actions into game state: shots, hits, HP, rounds.
-
-Modes (chosen from how many players T3 currently sees):
-  idle      fewer than two players in frame: waiting for a duel
-  duel      two players: shoot each other; first to 0 HP loses the round
-
-A shot is resolved when its bullet arrives, `bullet_travel_s` after firing, against the
-target's geometry *at arrival time*. That delay is what makes ducking a real defence.
-
-Powerups (duel only): every `powerup_interval_s` one is tossed up from below the screen and
-falls back out, like fruit in Fruit Ninja. Its path is a closed-form parabola, so its position
-at any time (including a bullet's arrival time) is exact. Whoever shoots it gets the effect:
-  heal    HP back to max_hp
-  double  this player's hits do double damage for double_damage_s
-  rocket  this player's next shot is a rocket on a ballistic arc: it explodes on impact and
-          the blast reaches players behind the wall. Each frame the rocket's path since the last
-          frame is swept as a line segment, so it cannot tunnel through a thin target.
-  grenade this player's next shot lobs a grenade at the opponent. It homes in on them and
-          lands after grenade_flight_s; if they are not ducked at that moment, they die.
-"""
-
 from __future__ import annotations
-
-import math
-from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
 
 from highnoon.config import GameConfig
 from highnoon.contracts import Player
-from highnoon.game.actions import ActionFrame, PlayerActions, Shot
-from highnoon.game.geometry import ray_circle, ray_exit_distance, ray_polygon, rect_polygon
+from highnoon.game.actions import PlayerActions, Shot
+from highnoon.game.entities import (
+    Aim,
+    Bullet,
+    Effect,
+    Grenade,
+    Hitbox,
+    PlayerState,
+    Powerup,
+    Rocket,
+    falling_path,
+)
+from highnoon.game.geometry import ray_exit_distance, rect_polygon, segment_circle_hits, segment_polygon_hits
 
-L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, NOSE = 11, 12, 23, 24, 0
-POWERUP_KINDS = ("heal", "double", "rocket", "grenade")
-
-
-@dataclass
-class Cover:
-    x0: float
-    y0: float
-    x1: float
-    y1: float
-
-    def polygon(self) -> np.ndarray:
-        return rect_polygon(self.x0, self.y0, self.x1, self.y1)
-
-
-@dataclass
-class PlayerState:
-    actions: PlayerActions
-    hp: int
-    ammo: int
-    frame: ActionFrame = field(default_factory=ActionFrame)
-    last_hit_t: float = -math.inf
-    double_until: float = -math.inf
-    rockets: int = 0
-    grenades: int = 0
-
-
-@dataclass
-class Bullet:
-    shooter: int
-    origin: np.ndarray
-    direction: np.ndarray
-    length: float  # px to where it was heading at fire time (for drawing the tracer)
-    t_fire: float
-    t_arrive: float
-
-
-@dataclass
-class Grenade:
-    thrower: int
-    target: int
-    origin: np.ndarray
-    t_throw: float
-    t_land: float
-    pos: np.ndarray  # current position (updated by the game, read by the renderer)
-    landing: np.ndarray  # where it is heading (the target's head, followed every frame)
-
-    def progress(self, t: float) -> float:
-        return min(1.0, (t - self.t_throw) / (self.t_land - self.t_throw))
-
-
-@dataclass
-class Rocket:
-    shooter: int
-    origin: np.ndarray
-    velocity: np.ndarray  # px/s at launch
-    gravity: float  # px/s^2, downward
-    t_fire: float
-    pos: np.ndarray  # where it was at the last update
-
-    def at(self, t: float) -> np.ndarray:
-        dt = t - self.t_fire
-        return self.origin + self.velocity * dt + np.array([0.0, 0.5 * self.gravity * dt * dt], np.float32)
-
-    def heading(self, t: float) -> np.ndarray:
-        return self.velocity + np.array([0.0, self.gravity * (t - self.t_fire)], np.float32)
-
-
-@dataclass
-class Powerup:
-    kind: str  # one of POWERUP_KINDS
-    origin: np.ndarray  # position at t_spawn
-    velocity: np.ndarray  # px/s at t_spawn
-    gravity: float  # px/s^2, downward
-    radius: float
-    t_spawn: float
-    t_end: float  # back below the screen
-
-    def center(self, t: float) -> np.ndarray:
-        dt = t - self.t_spawn
-        return self.origin + self.velocity * dt + np.array([0.0, 0.5 * self.gravity * dt * dt], np.float32)
-
-
-@dataclass
-class Effect:
-    kind: str  # "hit", "headshot", "blocked", "muzzle", "pickup", "explosion", "grenade", "safe"
-    pos: np.ndarray
-    t: float
-    player: int  # shooter
-    amount: int = 0  # damage dealt ("hit", "headshot")
-    detail: str = ""  # powerup kind ("pickup")
-
-
-@dataclass
-class Aim:
-    """What the laser sight of a player currently points at (for rendering)."""
-
-    origin: np.ndarray
-    end: np.ndarray
-    on_target: bool
-    path: np.ndarray | None = None  # predicted rocket arc (N, 2); None for a straight bullet
+NOSE = 0
+TORSO_CORNERS = [11, 12, 24, 23]
+POWERUP_KINDS = ("heal", "rocket", "grenade")
+EFFECT_LIFETIME_S = 0.8
+HEAD_RADIUS_PER_FACE = 0.6
+HEAD_RADIUS_PER_TORSO = 0.35
+TORSO_HITBOX_SCALE = 1.15
+DEFAULT_TORSO_PX = 100.0
+ROCKET_MAX_FLIGHT_S = 4.0
+ARC_PREVIEW_STEP_S = 0.04
+ARC_PREVIEW_STEPS = 60
+GRENADE_BLAST_SCALE = 1.4
 
 
 class Game:
@@ -143,333 +41,329 @@ class Game:
         self.bullets: list[Bullet] = []
         self.rockets: list[Rocket] = []
         self.grenades: list[Grenade] = []
-        self.effects: list[Effect] = []
         self.powerup: Powerup | None = None
-        self._next_powerup_t: float | None = None
-        self._t = 0.0
+        self.effects: list[Effect] = []
         self.aims: dict[int, Aim] = {}
         self.mode = "idle"
         self.winner: int | None = None
         self.round_over_t: float | None = None
         self.scores: dict[int, int] = {}
+        self._next_powerup_t: float | None = None
         self._rng = np.random.default_rng(seed)
         self._players: dict[int, Player] = {}
+        self._hitboxes: dict[int, Hitbox] = {}
+        self._wall = self.wall
+        self._t = 0.0
 
-    # ---------------------------------------------------------------- update
     def update(self, players: list[Player], t: float, reassigned: set[int]) -> None:
-        self._players = {p.id: p for p in players}
         self._t = t
-        for p in players:
-            if p.id in reassigned or (p.visible and p.id not in self.states):
-                self.states[p.id] = self._new_state()
-
+        self._players = {p.id: p for p in players}
+        self._hitboxes = {p.id: hitbox(p) for p in players if p.visible and p.smoothed is not None}
+        self._wall = self.wall
+        self._create_states(players, reassigned)
         self.mode = "duel" if sum(p.visible for p in players) >= 2 else "idle"
-
         if self.round_over_t is not None and t - self.round_over_t >= self.cfg.round_end_s:
             self.reset_round()
         self._update_powerup(t)
-
-        for p in players:
-            st = self.states.get(p.id)
-            if st is None:  # never seen yet
-                continue
-            st.frame = st.actions.update(p.signals if p.visible else None, t, self.height)
-            if st.frame.reload and st.ammo < self.cfg.max_ammo:  # ducking reloads
-                st.ammo = self.cfg.max_ammo
-            if st.frame.shot is not None and self.round_over_t is None:
-                self._fire(p.id, st, st.frame.shot, t)
-
+        for player in players:
+            self._update_player(player, t)
         self._resolve_bullets(t)
         self._update_rockets(t)
         self._update_grenades(t)
         self._update_aims(players)
-        self.effects = [e for e in self.effects if t - e.t < 0.8]
-
-    def double_active(self, pid: int) -> bool:
-        st = self.states.get(pid)
-        return st is not None and self._t < st.double_until
+        self.effects = [e for e in self.effects if t - e.t < EFFECT_LIFETIME_S]
 
     @property
-    def cover(self) -> Cover:
-        """The static wall along the bottom of the screen."""
-        return Cover(0.0, (1.0 - self.cfg.cover_height) * self.height, float(self.width), float(self.height))
+    def wall_top(self) -> float:
+        return (1.0 - self.cfg.cover_height) * self.height
+
+    @property
+    def wall(self) -> np.ndarray:
+        return rect_polygon(0.0, self.wall_top, float(self.width), float(self.height))
+
+    @property
+    def round_live(self) -> bool:
+        return self.round_over_t is None
+
+    def blast_radius(self, grenade: bool = False) -> float:
+        return self.cfg.rocket_blast_radius * self.height * (GRENADE_BLAST_SCALE if grenade else 1.0)
 
     def reset_round(self) -> None:
-        for st in self.states.values():
-            st.hp, st.ammo = self.cfg.max_hp, self.cfg.max_ammo
-            st.double_until, st.rockets, st.grenades = -math.inf, 0, 0
+        for state in self.states.values():
+            state.hp, state.ammo = self.cfg.max_hp, self.cfg.max_ammo
+            state.rockets = state.grenades = 0
         self.bullets.clear()
         self.rockets.clear()
         self.grenades.clear()
         self.powerup = None
-        self._next_powerup_t = None  # the timer restarts with the round
+        self._next_powerup_t = None
         self.winner = None
         self.round_over_t = None
 
-    def _new_state(self) -> PlayerState:
-        return PlayerState(PlayerActions(self.cfg), self.cfg.max_hp, self.cfg.max_ammo)
+    def _create_states(self, players: list[Player], reassigned: set[int]) -> None:
+        for player in players:
+            if player.id in reassigned or (player.visible and player.id not in self.states):
+                self.states[player.id] = PlayerState(
+                    PlayerActions(self.cfg), self.cfg.max_hp, self.cfg.max_ammo
+                )
 
-    # ---------------------------------------------------------------- shooting
-    def _fire(self, pid: int, st: PlayerState, shot: Shot, t: float) -> None:
-        target = next((q for q in self._players.values() if q.id != pid and q.visible), None)
-        if st.grenades > 0 and target is not None:  # aim does not matter: it homes in
-            st.grenades -= 1
-            land = self._grenade_landing(target)
-            flight = self.cfg.grenade_flight_s
-            self.grenades.append(
-                Grenade(pid, target.id, shot.origin, t, t + flight, shot.origin.copy(), land)
-            )
-            self.effects.append(Effect("grenade", land, t, pid))
-        elif st.rockets > 0:  # a rocket does not need bullets in the magazine
-            st.rockets -= 1
+    def _update_player(self, player: Player, t: float) -> None:
+        state = self.states.get(player.id)
+        if state is None:
+            return
+        state.frame = state.actions.update(player.signals if player.visible else None, t, self.height)
+        if state.frame.reload:
+            state.ammo = self.cfg.max_ammo
+        if state.frame.shot is not None and self.round_live:
+            self._fire(player.id, state, state.frame.shot, t)
+
+    def _opponent_of(self, player_id: int) -> Player | None:
+        return next((p for p in self._players.values() if p.id != player_id and p.id in self._hitboxes), None)
+
+    def _fire(self, shooter: int, state: PlayerState, shot: Shot, t: float) -> None:
+        opponent = self._opponent_of(shooter)
+        if state.grenades > 0 and opponent is not None:
+            state.grenades -= 1
+            self._throw_grenade(shooter, opponent, shot.origin, t)
+        elif state.rockets > 0:
+            state.rockets -= 1
             velocity, gravity = self._rocket_launch(shot.direction)
-            self.rockets.append(Rocket(pid, shot.origin, velocity, gravity, t, shot.origin.copy()))
-        elif st.ammo > 0:
-            st.ammo -= 1
-            length, _ = self._cast(pid, shot.origin, shot.direction)
-            travel = self.cfg.bullet_travel_s
-            self.bullets.append(Bullet(pid, shot.origin, shot.direction, length, t, t + travel))
+            self.rockets.append(Rocket(shooter, shot.origin, velocity, gravity, t, shot.origin.copy()))
+        elif state.ammo > 0:
+            state.ammo -= 1
+            length, _ = self._cast(shooter, shot.origin, shot.direction)
+            arrival = t + self.cfg.bullet_travel_s
+            self.bullets.append(Bullet(shooter, shot.origin, shot.direction, length, t, arrival))
         else:
             return
-        self.effects.append(Effect("muzzle", shot.origin, t, pid))
+        self.effects.append(Effect("muzzle", shot.origin, t, shooter))
 
     def _resolve_bullets(self, t: float) -> None:
-        remaining = []
-        for b in self.bullets:
-            if t < b.t_arrive:
-                remaining.append(b)
+        in_flight = []
+        for bullet in self.bullets:
+            if t < bullet.t_arrive:
+                in_flight.append(bullet)
                 continue
-            dist, what = self._cast(b.shooter, b.origin, b.direction)
-            pos = b.origin + b.direction * dist
-            kind, target = what
-            if kind in ("head", "body") and self.round_over_t is None:
-                amount = self.cfg.head_damage if kind == "head" else self.cfg.body_damage
-                self._damage(b.shooter, target, amount, "headshot" if kind == "head" else "hit", pos, t)
+            distance, (kind, target) = self._cast(bullet.shooter, bullet.origin, bullet.direction)
+            impact = bullet.origin + bullet.direction * distance
+            if kind in ("head", "body") and self.round_live:
+                damage = self.cfg.head_damage if kind == "head" else self.cfg.body_damage
+                self._damage(
+                    bullet.shooter, target, damage, "headshot" if kind == "head" else "hit", impact, t
+                )
             elif kind == "cover":
-                self.effects.append(Effect("blocked", pos, t, b.shooter))
+                self.effects.append(Effect("blocked", impact, t, bullet.shooter))
             elif kind == "powerup":
-                self._collect(b.shooter, target, pos, t)
-        self.bullets = remaining
+                self._collect(bullet.shooter, target, impact, t)
+        self.bullets = in_flight
 
-    # ---------------------------------------------------------------- rockets
     def _rocket_launch(self, direction: np.ndarray) -> tuple[np.ndarray, float]:
-        h = self.height
-        return (direction * self.cfg.rocket_speed * h).astype(np.float32), self.cfg.rocket_gravity * h
+        speed = self.cfg.rocket_speed * self.height
+        return (direction * speed).astype(np.float32), self.cfg.rocket_gravity * self.height
 
     def _update_rockets(self, t: float) -> None:
-        remaining = []
-        for r in self.rockets:
-            new = r.at(t)
-            hit = self._sweep(r.shooter, r.pos, new)
+        in_flight = []
+        for rocket in self.rockets:
+            next_pos = rocket.at(t)
+            hit = self._first_hit_along(rocket.shooter, np.stack([rocket.pos, next_pos]))
             if hit is not None:
-                pos, (kind, target) = hit
+                _, impact, (kind, target) = hit
                 if kind == "powerup":
-                    self._collect(r.shooter, target, pos, t)
-                self._explode(r.shooter, pos, t)
-            elif -0.1 * self.width < new[0] < 1.1 * self.width and t - r.t_fire < 4.0:
-                r.pos = new
-                remaining.append(r)
-        self.rockets = remaining
+                    self._collect(rocket.shooter, target, impact, t)
+                self._explode(rocket.shooter, impact, t)
+            elif self._rocket_in_play(rocket, next_pos, t):
+                rocket.pos = next_pos
+                in_flight.append(rocket)
+        self.rockets = in_flight
 
-    def _sweep(self, shooter: int, a: np.ndarray, b: np.ndarray):
-        """First thing on the segment a -> b, as (point, (kind, target)), or None."""
-        if a[1] < 0 and b[1] < 0:
-            return None  # above the screen: nothing to hit up there
-        if a[1] < 0:  # coming back down into view: start at the top edge
-            a = a + (b - a) * (-a[1] / (b[1] - a[1]))
-        seg = b - a
-        n = float(np.linalg.norm(seg))
-        if n < 1e-6:
-            return None
-        d = seg / n
-        dist, what = self._cast(shooter, a, d)
-        if what[0] == "miss" or dist > n:
-            return None
-        return a + d * dist, what
+    def _rocket_in_play(self, rocket: Rocket, pos: np.ndarray, t: float) -> bool:
+        on_screen_width = -0.1 * self.width < pos[0] < 1.1 * self.width
+        return on_screen_width and t - rocket.t_fire < ROCKET_MAX_FLIGHT_S
 
     def _predict_arc(self, shooter: int, origin: np.ndarray, direction: np.ndarray):
-        """Points along the arc a rocket fired now would fly, up to impact (for the aim preview)."""
         velocity, gravity = self._rocket_launch(direction)
-        r = Rocket(shooter, origin, velocity, gravity, 0.0, origin)
-        points, prev, what = [origin], origin, ("miss", None)
-        for k in range(1, 61):
-            new = r.at(k * 0.04)
-            hit = self._sweep(shooter, prev, new)
-            if hit is not None:
-                points.append(hit[0])
-                what = hit[1]
-                break
-            points.append(new)
-            if not (0 <= new[0] <= self.width) or new[1] > self.height:
-                break
-            prev = new
-        return np.array(points, np.float32), what
+        times = np.arange(ARC_PREVIEW_STEPS + 1, dtype=np.float32) * ARC_PREVIEW_STEP_S
+        path = falling_path(origin, velocity, gravity, times)
+        off_screen = (path[:, 0] < 0) | (path[:, 0] > self.width) | (path[:, 1] > self.height)
+        if off_screen.any():
+            path = path[: int(np.argmax(off_screen)) + 1]
+        hit = self._first_hit_along(shooter, path)
+        if hit is None:
+            return path, ("miss", None)
+        segment, impact, what = hit
+        return np.vstack([path[: segment + 1], impact]), what
 
-    def _explode(self, shooter: int, pos: np.ndarray, t: float) -> None:
-        """Blast damage to every other player within the radius, wall or not."""
-        self.effects.append(Effect("explosion", pos, t, shooter))
-        if self.round_over_t is not None:
-            return
-        cfg = self.cfg
-        radius = cfg.rocket_blast_radius * self.height
-        for pid, p in self._players.items():
-            if pid == shooter or not p.visible or p.smoothed is None:
-                continue
-            (head_c, head_r), torso = self._hitboxes(p)
-            # Distance from the impact to the nearest point of the player (0 when inside).
-            to_head = max(0.0, float(np.linalg.norm(pos - head_c)) - head_r)
-            to_torso = max(0.0, -cv2.pointPolygonTest(torso, (float(pos[0]), float(pos[1])), True))
-            dist = min(to_head, to_torso)
-            if dist > radius:
-                continue
-            amount = round(cfg.rocket_damage - (cfg.rocket_damage - cfg.rocket_min_damage) * dist / radius)
-            self._damage(shooter, pid, amount, "hit", torso.mean(axis=0), t)
-            if self.round_over_t is not None:
-                return
+    def _grenade_landing(self, player: Player) -> np.ndarray:
+        return self._hitboxes[player.id].head_center.copy()
 
-    # ---------------------------------------------------------------- grenades
-    def _grenade_landing(self, p: Player) -> np.ndarray:
-        head, _ = self._hitboxes(p)
-        return head[0].copy()
+    def _throw_grenade(self, thrower: int, target: Player, origin: np.ndarray, t: float) -> None:
+        landing = self._grenade_landing(target)
+        flight_end = t + self.cfg.grenade_flight_s
+        self.grenades.append(Grenade(thrower, target.id, origin, t, flight_end, origin.copy(), landing))
+        self.effects.append(Effect("grenade", landing, t, thrower))
 
     def _update_grenades(self, t: float) -> None:
-        remaining = []
-        for g in self.grenades:
-            target = self._players.get(g.target)
-            if target is not None and target.visible and target.smoothed is not None:
-                g.landing = self._grenade_landing(target)
-            # Straight line to the (moving) target plus a parabolic lob on top: 4 * h * u * (1 - u).
-            u = g.progress(t)
-            lob = 4 * self.cfg.grenade_arc * self.height * u * (1 - u)
-            g.pos = g.origin + (g.landing - g.origin) * u - np.array([0.0, lob], np.float32)
-            if u < 1.0:
-                remaining.append(g)
-                continue
-            self.effects.append(Effect("explosion", g.pos.copy(), t, g.thrower, detail="grenade"))
-            st = self.states.get(g.target)
-            if st is None or self.round_over_t is not None:
-                continue
-            if st.frame.ducked:
-                self.effects.append(Effect("safe", g.pos.copy(), t, g.thrower))
+        in_flight = []
+        for grenade in self.grenades:
+            target = self._players.get(grenade.target)
+            if target is not None and target.id in self._hitboxes:
+                grenade.landing = self._grenade_landing(target)
+            progress = grenade.progress(t)
+            lob = 4 * self.cfg.grenade_arc * self.height * progress * (1 - progress)
+            grenade.pos = grenade.origin + (grenade.landing - grenade.origin) * progress
+            grenade.pos[1] -= lob
+            if progress < 1.0:
+                in_flight.append(grenade)
             else:
-                self._damage(g.thrower, g.target, st.hp, "hit", g.pos.copy(), t)  # all remaining HP
-        self.grenades = remaining
+                self._detonate_grenade(grenade, t)
+        self.grenades = in_flight
 
-    def _damage(
-        self, shooter: int, target_id: int, amount: int, effect: str, pos: np.ndarray, t: float
-    ) -> None:
-        st = self.states[target_id]
-        if t < self.states[shooter].double_until:
-            amount *= 2
-        st.hp = max(0, st.hp - amount)
-        st.last_hit_t = t
+    def _detonate_grenade(self, grenade: Grenade, t: float) -> None:
+        self.effects.append(Effect("explosion", grenade.pos.copy(), t, grenade.thrower, detail="grenade"))
+        state = self.states.get(grenade.target)
+        if state is None or not self.round_live:
+            return
+        if state.frame.ducked:
+            self.effects.append(Effect("safe", grenade.pos.copy(), t, grenade.thrower))
+        else:
+            self._damage(grenade.thrower, grenade.target, state.hp, "hit", grenade.pos.copy(), t)
+
+    def _explode(self, shooter: int, center: np.ndarray, t: float) -> None:
+        self.effects.append(Effect("explosion", center, t, shooter))
+        radius = self.blast_radius()
+        for player_id, box in self._hitboxes.items():
+            if player_id == shooter or not self.round_live:
+                continue
+            distance = distance_to_hitbox(center, box)
+            if distance <= radius:
+                falloff = (self.cfg.rocket_damage - self.cfg.rocket_min_damage) * distance / radius
+                damage = round(self.cfg.rocket_damage - falloff)
+                self._damage(shooter, player_id, damage, "hit", box.torso.mean(axis=0), t)
+
+    def _damage(self, shooter: int, target: int, amount: int, effect: str, pos: np.ndarray, t: float) -> None:
+        state = self.states[target]
+        state.hp = max(0, state.hp - amount)
+        state.last_hit_t = t
         self.effects.append(Effect(effect, pos, t, shooter, amount))
-        if st.hp == 0:
+        if state.hp == 0:
             self.winner = shooter
             self.round_over_t = t
             self.scores[shooter] = self.scores.get(shooter, 0) + 1
 
     def _cast(self, shooter: int, origin: np.ndarray, direction: np.ndarray):
-        """First thing a ray from `shooter` hits. Returns (distance, (kind, target))."""
-        best = ray_exit_distance(origin, direction, self.width, self.height)
-        hit: tuple[str, object] = ("miss", None)
+        reach = ray_exit_distance(origin, direction, self.width, self.height)
+        hit = self._first_hit(shooter, origin[None, :], (origin + direction * reach)[None, :])
+        if hit is None:
+            return reach, ("miss", None)
+        _, fraction, what = hit
+        return fraction * reach, what
 
-        def consider(dist: float | None, what: tuple[str, object]) -> None:
-            nonlocal best, hit
-            if dist is not None and dist < best:
-                best, hit = dist, what
+    def _first_hit_along(self, shooter: int, path: np.ndarray):
+        hit = self._first_hit(shooter, path[:-1], path[1:])
+        if hit is None:
+            return None
+        segment, fraction, what = hit
+        impact = path[segment] + (path[segment + 1] - path[segment]) * fraction
+        return segment, impact.astype(np.float32), what
 
-        # The wall blocks every shot that reaches it, including shots fired from behind it.
-        consider(ray_polygon(origin, direction, self.cover.polygon()), ("cover", None))
+    def _first_hit(self, shooter: int, starts: np.ndarray, ends: np.ndarray):
+        fractions, targets = self._hit_fractions(shooter, starts, ends)
+        hit_segments = np.flatnonzero(np.isfinite(fractions).any(axis=0))
+        if not len(hit_segments):
+            return None
+        segment = int(hit_segments[0])
+        target = int(np.argmin(fractions[:, segment]))
+        return segment, float(fractions[target, segment]), targets[target]
 
-        for pid, p in self._players.items():
-            if pid == shooter or not p.visible or p.smoothed is None:
+    def _hit_fractions(self, shooter: int, starts: np.ndarray, ends: np.ndarray):
+        rows = [segment_polygon_hits(starts, ends, self._wall)]
+        targets: list[tuple[str, object]] = [("cover", None)]
+        for player_id, box in self._hitboxes.items():
+            if player_id == shooter or player_id not in self.states:
                 continue
-            st = self.states[pid]
-            head, torso = self._hitboxes(p)
-            if st.frame.ducked:
-                # Behind cover: anything that would have hit the player is stopped by the crate.
-                dists = (ray_circle(origin, direction, *head), ray_polygon(origin, direction, torso))
-                body_hit = min((d for d in dists if d is not None), default=None)
-                consider(body_hit, ("cover", pid))
+            head = segment_circle_hits(starts, ends, box.head_center, box.head_radius)
+            body = segment_polygon_hits(starts, ends, box.torso)
+            if self.states[player_id].frame.ducked:
+                rows.append(np.minimum(head, body))
+                targets.append(("cover", player_id))
             else:
-                consider(ray_circle(origin, direction, *head), ("head", pid))
-                consider(ray_polygon(origin, direction, torso), ("body", pid))
+                rows += [head, body]
+                targets += [("head", player_id), ("body", player_id)]
         if self.powerup is not None:
-            pu = self.powerup
-            consider(ray_circle(origin, direction, pu.center(self._t), pu.radius), ("powerup", pu))
-        return best, hit
+            center = self.powerup.center(self._t)
+            rows.append(segment_circle_hits(starts, ends, center, self.powerup.radius))
+            targets.append(("powerup", self.powerup))
+        return np.stack(rows), targets
 
-    def _hitboxes(self, p: Player) -> tuple[tuple[np.ndarray, float], np.ndarray]:
-        kp = p.smoothed
-        torso_len = p.signals.torso_len if p.signals else 100.0
-        if p.face is not None:
-            x0, y0, x1, y1 = p.face.bbox
-            head = (np.array([(x0 + x1) / 2, (y0 + y1) / 2], np.float32), 0.6 * max(x1 - x0, y1 - y0))
-        else:
-            head = (kp[NOSE].copy(), 0.35 * torso_len)
-        # Torso quad, widened a little so shots at the arms' base still count.
-        quad = kp[[L_SHOULDER, R_SHOULDER, R_HIP, L_HIP]].astype(np.float32)
-        center = quad.mean(axis=0)
-        torso = center + (quad - center) * 1.15
-        return head, torso
-
-    # ---------------------------------------------------------------- aims
     def _update_aims(self, players: list[Player]) -> None:
         self.aims = {}
-        for p in players:
-            st = self.states.get(p.id)
-            if st is None or not (p.visible and st.frame.aiming and p.signals is not None):
+        for player in players:
+            state = self.states.get(player.id)
+            if state is None or not (player.visible and state.frame.aiming and player.signals is not None):
                 continue
-            o, d = p.signals.aim_origin, p.signals.aim_dir
-            if st.rockets > 0:
-                path, (kind, target) = self._predict_arc(p.id, o, d)
-                # A rocket landing on the wall in front of a ducked player still hits them.
-                on = kind in ("head", "body", "powerup") or (kind == "cover" and target is not None)
-                self.aims[p.id] = Aim(o, path[-1], on, path)
-                continue
-            dist, (kind, _) = self._cast(p.id, o, d)
-            self.aims[p.id] = Aim(o, o + d * dist, kind in ("head", "body", "powerup"))
+            origin, direction = player.signals.aim_origin, player.signals.aim_dir
+            if state.rockets > 0:
+                path, (kind, target) = self._predict_arc(player.id, origin, direction)
+                lands_on_player = kind in ("head", "body", "powerup") or (
+                    kind == "cover" and target is not None
+                )
+                self.aims[player.id] = Aim(origin, path[-1], lands_on_player, path)
+            else:
+                distance, (kind, _) = self._cast(player.id, origin, direction)
+                self.aims[player.id] = Aim(
+                    origin, origin + direction * distance, kind in ("head", "body", "powerup")
+                )
 
-    # ---------------------------------------------------------------- powerups
     def _update_powerup(self, t: float) -> None:
         if self.powerup is not None and t >= self.powerup.t_end:
             self.powerup = None
-        # Only duels spawn powerups. Leaving the duel for a frame (a player briefly not detected)
-        # does not reset the timer; only a new round does.
-        if self.mode != "duel" or self.round_over_t is not None:
+        if self.mode != "duel" or not self.round_live:
             return
         if self._next_powerup_t is None:
             self._next_powerup_t = t + self.cfg.powerup_interval_s
         if t >= self._next_powerup_t and self.powerup is None:
-            self.powerup = self._spawn_powerup(t)
+            self.powerup = self._toss_powerup(t)
             self._next_powerup_t = t + self.cfg.powerup_interval_s
 
-    def _spawn_powerup(self, t: float) -> Powerup:
-        """Toss a powerup up from just below the screen so it peaks above the wall and falls back.
-
-        With rise time T to a peak d px above the start: g = 2d / T^2 and v_y = -2d / T.
-        """
-        h, w, rng = self.height, self.width, self._rng
-        radius = self.cfg.powerup_radius * h
-        start = np.array([rng.uniform(0.3, 0.7) * w, h + radius], np.float32)
-        peak_y = rng.uniform(0.22, 0.4) * h
-        rise = self.cfg.powerup_rise_s
-        d = float(start[1] - peak_y)
-        land_x = rng.uniform(0.2, 0.8) * w
-        velocity = np.array([(land_x - start[0]) / (2 * rise), -2 * d / rise], np.float32)
+    def _toss_powerup(self, t: float) -> Powerup:
+        rng, rise_s = self._rng, self.cfg.powerup_rise_s
+        radius = self.cfg.powerup_radius * self.height
+        start = np.array([rng.uniform(0.3, 0.7) * self.width, self.height + radius], np.float32)
+        rise_px = float(start[1] - rng.uniform(0.22, 0.4) * self.height)
+        landing_x = rng.uniform(0.2, 0.8) * self.width
+        velocity = np.array([(landing_x - start[0]) / (2 * rise_s), -2 * rise_px / rise_s], np.float32)
         kind = POWERUP_KINDS[int(rng.integers(len(POWERUP_KINDS)))]
-        return Powerup(kind, start, velocity, 2 * d / rise**2, radius, t, t + 2 * rise)
+        return Powerup(kind, start, velocity, 2 * rise_px / rise_s**2, radius, t, t + 2 * rise_s)
 
-    def _collect(self, pid: int, pu: Powerup, pos: np.ndarray, t: float) -> None:
-        self.powerup = None  # a second bullet in the same frame now finds nothing
-        st = self.states[pid]
-        if pu.kind == "heal":
-            st.hp = self.cfg.max_hp
-        elif pu.kind == "double":
-            st.double_until = t + self.cfg.double_damage_s
-        elif pu.kind == "rocket":
-            st.rockets = 1
+    def _collect(self, player_id: int, powerup: Powerup, pos: np.ndarray, t: float) -> None:
+        self.powerup = None
+        state = self.states[player_id]
+        if powerup.kind == "heal":
+            state.hp = self.cfg.max_hp
+        elif powerup.kind == "rocket":
+            state.rockets = 1
         else:
-            st.grenades = 1
-        self.effects.append(Effect("pickup", pos, t, pid, detail=pu.kind))
+            state.grenades = 1
+        self.effects.append(Effect("pickup", pos, t, player_id, detail=powerup.kind))
+
+
+def hitbox(player: Player) -> Hitbox:
+    keypoints = player.smoothed
+    torso_len = player.signals.torso_len if player.signals else DEFAULT_TORSO_PX
+    if player.face is not None:
+        x0, y0, x1, y1 = player.face.bbox
+        head_center = np.array([(x0 + x1) / 2, (y0 + y1) / 2], np.float32)
+        head_radius = HEAD_RADIUS_PER_FACE * float(max(x1 - x0, y1 - y0))
+    else:
+        head_center = keypoints[NOSE].copy()
+        head_radius = HEAD_RADIUS_PER_TORSO * torso_len
+    corners = keypoints[TORSO_CORNERS].astype(np.float32)
+    middle = corners.mean(axis=0)
+    torso = middle + (corners - middle) * TORSO_HITBOX_SCALE
+    return Hitbox(head_center, head_radius, torso)
+
+
+def distance_to_hitbox(point: np.ndarray, box: Hitbox) -> float:
+    to_head = max(0.0, float(np.linalg.norm(point - box.head_center)) - box.head_radius)
+    signed = cv2.pointPolygonTest(box.torso, (float(point[0]), float(point[1])), True)
+    return min(to_head, max(0.0, -signed))

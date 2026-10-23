@@ -1,7 +1,7 @@
 # HIGH NOON — Duck & Cover
 
 A two-player webcam duel shooter for the IPCV 2026-1A group project (University of Twente).
-Players aim with an outstretched arm, fire with a recoil flick, and duck behind cover to dodge.
+Players aim with an outstretched arm, fire by closing their hand, and duck behind cover to dodge.
 The only controller is computer vision on a single webcam.
 
 ## Team and task ownership
@@ -94,20 +94,17 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 
 - **The game needs two players in view.** With fewer, it waits.
 - **Duel.** A body hit costs 15 HP and a headshot 35. First to 0 loses the round.
-  Bullets take 0.25 s to arrive, so you can duck when you see your opponent flick.
+  Bullets take 0.25 s to arrive, so you can duck when you see your opponent fire.
 - **Powerups (duel only).** Every 30 s a powerup is tossed up from below the screen, flies in an
   arc and falls back out. Whoever shoots it first gets it (lead your shot: it moves):
 
   | Powerup | Effect |
   |---|---|
   | **FULL HP** (red cross) | HP back to 100 |
-  | **2X DAMAGE** (gold) | Your hits do double damage for 10 s |
   | **ROCKET LAUNCHER** (orange) | Your next shot is a rocket on a ballistic arc (a dotted preview shows where it lands). It explodes on impact, and the blast reaches over the wall: 50 damage at the centre, 20 at the edge |
   | **GRENADE** (green) | Your next shot lobs a grenade at your opponent, wherever they move. If they are not ducked when it lands 1.4 s later, they die |
 
-All thresholds are in `GameConfig` (`highnoon/config.py`). Set `trigger = "flick"` to fire with an
-upward recoil flick of the arm instead of a fist (useful when standing too far away for hand tracking).
-With the debug overlay on (`d`), the live values the thresholds act on are shown under each
+All thresholds are in `GameConfig` (`highnoon/config.py`). With the debug overlay on (`d`), the live values the thresholds act on are shown under each
 player's face.
 
 To tune from a recording: `python tools/record.py clips/moves.mp4`, then
@@ -120,7 +117,7 @@ On first run macOS will ask for camera permission for your terminal app.
 run tests it in a separate process (a broken GPU delegate can crash MediaPipe outright), falls back
 to CPU if needed, and caches the answer in `models/.delegate_cache.json`. macOS always uses CPU
 because the GPU delegate crashes there. MediaPipe officially supports GPU only on Ubuntu, so on
-Windows compare speeds first: `python tools/bench_models.py --delegate gpu` vs `--delegate cpu`.
+Windows compare `--delegate gpu` with `--delegate cpu` using `--headless --fast` on a recorded clip.
 
 ## Testing and benchmarking
 
@@ -132,9 +129,6 @@ Windows compare speeds first: `python tools/bench_models.py --delegate gpu` vs `
 .venv/bin/python tools/record.py clips/crossing.mp4 --seconds 20
 .venv/bin/python -m highnoon --source clips/crossing.mp4 --metrics-csv results/crossing.csv
 .venv/bin/python -m highnoon --source clips/crossing.mp4 --headless --fast   # max throughput
-
-# compare model/threading variants in isolation
-.venv/bin/python tools/bench_models.py --source clips/crossing.mp4
 ```
 
 `--metrics-csv` writes one row per frame with every stage's time, FPS and capture-to-screen
@@ -177,20 +171,22 @@ highnoon/
   tracking/
     identity.py        persistent player ids, face-to-player assignment (T3)
   render/
-    renderer.py        background compositing, overlays, debug panel (T5)
-    game_view.py       laser sights, tracers, powerups, name tags, HUD cards, announcements (T4/T5)
-    assets.py          procedural backdrop/wall/sprites, cached TrueType text
-    fx.py              particles, floating numbers, screen shake
-    display.py         pyglet (OpenGL) / OpenCV window output
+    renderer.py        background compositing, wall, layer order, debug overlay (T5)
+    world.py           lasers, rocket arc preview, tracers, powerups, rockets, grenades, explosions
+    hud.py             name tags, HUD cards, banner, winner screen, announcements
+    palette.py         shared colours
+    assets.py          sprites (cached blend weights), procedural scenery, cached TrueType text
+    fx.py              particles, floating numbers, announcements, screen shake
+    display.py         pyglet (OpenGL) window; screen shake is applied on the GPU
   game/
     actions.py         fire / duck / reload state machines (T4)
-    game.py            rules: shots, hits, HP, rounds, powerups (T4)
-    geometry.py        2D ray casting against hitboxes and cover
+    entities.py        game objects: player state, bullets, rockets, grenades, powerups, effects
+    game.py            rules: shots, hits, HP, rounds, powerups, rockets, grenades (T4)
+    geometry.py        vectorised segment tests against circles and polygons
 tools/
   download_models.py   fetch + verify model weights
   analyze_clip.py      replay a clip through the game, log signals + detected actions
   record.py            record raw webcam clips for repeatable tests
-  bench_models.py      model / threading benchmark
 tests/                 pytest unit tests
 assets/fonts/          Rye and Bebas Neue (SIL Open Font License, licence files included)
 docs/PERFORMANCE.md    measurements and design decisions
@@ -199,7 +195,8 @@ docs/PERFORMANCE.md    measurements and design decisions
 ## Dependencies
 
 Pinned in `requirements.txt`: mediapipe 0.10.35 (1.0.x crashes on macOS), opencv-contrib-python
-5.0.0, numpy, scipy, pyglet. Model weights are not in the repo. `tools/download_models.py`
+5.0.0 (mediapipe needs the contrib build), numpy, scipy, pyglet (OpenGL window, no bundled SDL),
+pillow (TrueType HUD text). Model weights are not in the repo. `tools/download_models.py`
 fetches them from Google's MediaPipe model storage and checks their sha256.
 
 ## AI usage
@@ -207,9 +204,3 @@ fetches them from Google's MediaPipe model storage and checks their sha256.
 This foundation was scaffolded with Claude Code (Anthropic). The design choices and every
 number in `docs/PERFORMANCE.md` were measured on our hardware. The full AI and external-tools
 statement will be in the report appendix.
-
-
-### IDEAS
-
-1. Arcade mode.
-2. ~~Powerups.~~ Done.
