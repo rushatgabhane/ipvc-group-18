@@ -21,6 +21,12 @@ def parse_args() -> Config:
         default="auto",
         help="inference device; auto = GPU on Windows/Linux when it works, else CPU",
     )
+    parser.add_argument(
+        "--spread",
+        type=float,
+        default=0.55,
+        help="on screen, keep players at least this fraction of the width apart (0 = off)",
+    )
     parser.add_argument("--headless", action="store_true", help="no window")
     parser.add_argument("--mute", action="store_true", help="no sound effects")
     parser.add_argument("--vsync", action="store_true", help="sync to display refresh (adds latency)")
@@ -49,6 +55,7 @@ def parse_args() -> Config:
     cfg.games_csv = None if args.no_games_csv else args.games_csv
     cfg.record_video = args.record
     cfg.max_frames = args.max_frames
+    cfg.stage_spread = args.spread
     return cfg
 
 

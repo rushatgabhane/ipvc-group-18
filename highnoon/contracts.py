@@ -55,6 +55,7 @@ class Perception:
     t_done: float
     timings: dict[str, float] = field(default_factory=dict)
     hands: list[HandObservation] = field(default_factory=list)
+    person_masks: list[np.ndarray] = field(default_factory=list)
 
 
 @dataclass(slots=True)
