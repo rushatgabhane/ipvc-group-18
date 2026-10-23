@@ -272,3 +272,12 @@ def test_grenade_aim_previews_a_lob_onto_the_opponent():
     assert aim.weapon == "grenade" and aim.path is not None
     assert aim.path[len(aim.path) // 2][1] < min(aim.path[0][1], aim.path[-1][1]) - 50
     assert np.allclose(aim.path[-1], aim.end)
+
+
+def test_in_between_updates_on_the_same_frame_do_not_fire_twice():
+    game, t = start_duel()
+    t = step(game, duel, 12, t)
+    fist = duel(hand=FIST)
+    game.update(fist, t, set())
+    game.update(fist, t + DT / 2, set())
+    assert len(game.bullets) == 1 and game.states[1].ammo == game.cfg.max_ammo - 1

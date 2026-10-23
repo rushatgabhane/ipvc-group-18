@@ -166,6 +166,9 @@ far and the decisions taken from them.
             (1 slot)                                         (newest result only)
 ```
 
+- **60 fps drawing on a 30 fps camera.** Between two camera frames the game advances once more on the last
+  known poses and redraws everything on top of the last camera picture, so bullets, rockets, particles
+  and text move at 60 fps. Shots only fire on real camera frames. `render_hz` in `DisplayConfig` (0 = off).
 - **Three threads, newest-frame-only hand-off.** When any stage is slow, frames are dropped,
   never queued, so latency stays bounded. Rendering frame N overlaps inference of frame N+1.
 - **`highnoon/contracts.py`** defines the data passed between tasks (`Frame`, `Perception`,

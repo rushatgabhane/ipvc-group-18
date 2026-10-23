@@ -38,20 +38,27 @@ class Renderer:
     def render(
         self, perception: Perception, players: list[Player], game: Game, profiler: Profiler
     ) -> np.ndarray:
+        self.set_camera(perception, players, game)
+        return self.draw(perception, players, game, profiler, perception.frame.t_capture)
+
+    def set_camera(self, perception: Perception, players: list[Player], game: Game) -> None:
         frame = perception.frame
         height, width = frame.image.shape[:2]
         self._build_scenery(width, height, game.cfg.cover_height)
-        t = frame.t_capture
-        dt = 0.0 if self._t_last is None else min(t - self._t_last, MAX_FRAME_STEP_S)
-        self._t_last = t
-
-        image = self._camera_layer(frame.image, perception.mask)
+        base = self._camera_layer(frame.image, perception.mask)
         if self.cfg.show_debug:
             for player in players:
                 if player.visible:
-                    draw_skeleton(image, player)
-        self._draw_wall(image)
+                    draw_skeleton(base, player)
+        self._draw_wall(base)
+        self._base = base
 
+    def draw(
+        self, perception: Perception, players: list[Player], game: Game, profiler: Profiler, t: float
+    ) -> np.ndarray:
+        dt = 0.0 if self._t_last is None else min(max(0.0, t - self._t_last), MAX_FRAME_STEP_S)
+        self._t_last = t
+        image = self._base.copy()
         self.fx.update(t, game.effects)
         self.world.draw(image, game, t, dt)
         self.hud.draw(image, game, players, t, dt)

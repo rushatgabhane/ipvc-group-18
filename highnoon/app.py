@@ -16,6 +16,9 @@ from highnoon.tracking.identity import IdentityTracker
 from highnoon.vision.motion import MotionFilter
 from highnoon.vision.perception import Perceiver, PerceptionWorker
 
+MAX_EXTRAPOLATE_S = 0.1
+PERIOD_FOLLOW = 0.1
+LATE_FRAME = 1.5
 KEY_HELP = "q/esc quit | r restart round | d debug overlay | b background | f fullscreen"
 
 
@@ -37,45 +40,76 @@ def run(cfg: Config) -> Profiler:
 
     source.start()
     worker.start()
+    tick_s = (
+        1.0 / cfg.display.render_hz
+        if display is not None and cfg.capture.realtime and cfg.display.render_hz
+        else None
+    )
     last_frame_id = 0
     frames_shown = 0
+    perception = players = None
+    t_game = arrived = 0.0
+    frame_period = 1.0 / cfg.capture.fps
+    tweens = 0
+    next_tick = time.perf_counter()
     try:
         while True:
-            perception = worker.get(last_frame_id, timeout=1.0)
-            if perception is None:
-                if worker.finished:
-                    break
+            per_frame = max(1, round(frame_period / tick_s)) - 1 if tick_s else 0
+            due = next_tick if tweens < per_frame else arrived + LATE_FRAME * frame_period * (tweens + 1)
+            wait = 1.0 if tick_s is None or players is None else max(0.0, due - time.perf_counter())
+            fresh = worker.get(last_frame_id, timeout=wait)
+            if fresh is None and worker.finished:
+                break
+            if fresh is None and (tick_s is None or players is None):
                 continue
-            frame = perception.frame
-            record_pipeline_timings(profiler, perception, last_frame_id)
-            last_frame_id = frame.id
-
-            with profiler.stage("tracking"):
-                players = tracker.update(perception)
-            with profiler.stage("filter"):
-                motion.update(players, frame.t_capture, tracker.reassigned)
-            with profiler.stage("game"):
-                game.width, game.height = frame.size
-                game.update(players, frame.t_capture, tracker.reassigned)
+            if fresh is not None:
+                perception = fresh
+                tweens = 0
+                frame = perception.frame
+                record_pipeline_timings(profiler, perception, last_frame_id)
+                last_frame_id = frame.id
+                now = time.perf_counter()
+                if arrived:
+                    frame_period += PERIOD_FOLLOW * (min(now - arrived, MAX_EXTRAPOLATE_S) - frame_period)
+                arrived = now
+                t_game = max(t_game, frame.t_capture)
+                with profiler.stage("tracking"):
+                    players = tracker.update(perception)
+                with profiler.stage("filter"):
+                    motion.update(players, frame.t_capture, tracker.reassigned)
+                with profiler.stage("game"):
+                    game.width, game.height = frame.size
+                    game.update(players, t_game, tracker.reassigned)
+                if recorder is not None:
+                    recorder.add(frame.image)
+                if signal_log is not None:
+                    signal_log.record(frame.id, t_game, players, game, len(perception.hands))
+                with profiler.stage("camera"):
+                    renderer.set_camera(perception, players, game)
+            else:
+                tweens += 1
+                since_frame = min(time.perf_counter() - arrived, MAX_EXTRAPOLATE_S)
+                t_game = max(t_game, perception.frame.t_capture + since_frame)
+                game.update(players, t_game, set())
             if sounds is not None:
-                with profiler.stage("sound"):
-                    sounds.update(game, frame.t_capture)
-            if recorder is not None:
-                recorder.add(frame.image)
-            if signal_log is not None:
-                signal_log.record(frame.id, frame.t_capture, players, game, len(perception.hands))
-            with profiler.stage("render"):
-                output = renderer.render(perception, players, game, profiler)
+                sounds.update(game, t_game)
+            with profiler.stage("render" if fresh is not None else "tween"):
+                output = renderer.draw(perception, players, game, profiler, t_game)
 
             if display is not None:
-                with profiler.stage("display"):
+                with profiler.stage("display" if fresh is not None else "tween_display"):
                     keys = display.show(output, renderer.shake)
                 if handle_keys(keys, cfg, game, display):
                     break
+            if tick_s is not None:
+                between = frame_period / max(1, round(frame_period / tick_s))
+                next_tick = arrived + between if fresh is not None else next_tick + between
+            if fresh is None:
+                continue
 
             profiler.end_frame(frame.id, frame.t_capture)
             if match_log is not None:
-                match_log.update(game, players, frame.t_capture, profiler.last_frame)
+                match_log.update(game, players, t_game, profiler.last_frame)
             frames_shown += 1
             if cfg.max_frames is not None and frames_shown >= cfg.max_frames:
                 break

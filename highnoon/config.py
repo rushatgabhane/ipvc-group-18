@@ -95,6 +95,7 @@ class DisplayConfig:
     window_name: str = "HIGH NOON"
     show_debug: bool = False
     sound: bool = True
+    render_hz: int = 60
     background: bool = True
 
 
