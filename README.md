@@ -93,7 +93,7 @@ Change it with `--spread 0.7` or turn it off with `--spread 0`.
 | Action | Movement |
 |---|---|
 | **Aim** | Point with your arm (straight, or just the forearm when sitting close). The weapon you hold (revolver, rocket launcher or grenade), outlined in your colour, follows your hand and shows the angle. Rockets and grenades show a dotted arc of where they will land |
-| **Shoot** | Aim with an **open hand**, then **close it into a fist**. Hold the hand open again briefly before the next shot (at most one shot every 0.6 s). Shots fired quickly after each other kick: each one adds random spread, which recovers within about 1 s |
+| **Shoot** | Aim with an **open hand**, then **close it into a fist**. Hold the hand open again briefly before the next shot (at most one shot every 0.6 s). Shots fired quickly after each other kick: each one adds up to 10° of random spread (20° max), which recovers within about 1.2 s |
 | **Duck** | Get your head below the top of the wall (the bottom 25% of the screen). You are safe there but cannot shoot |
 | **Reload** | Stay ducked for 0.8 s to refill the magazine (3 bullets). A bar under your name shows the progress |
 | **No camping** | After 7 s ducked you lose 5 HP every second until you stand up ("GET UP!" warns you from 5 s, then "GET OUT CAMPER!" while you are losing HP) |

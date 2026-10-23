@@ -52,9 +52,9 @@ class GameConfig:
     aim_lookback_s: float = 0.1
     armed_after_s: float = 0.3
     fire_cooldown_s: float = 0.6
-    recoil_per_shot_deg: float = 8.0
-    recoil_recovery_s: float = 1.0
-    recoil_max_deg: float = 16.0
+    recoil_per_shot_deg: float = 10.0
+    recoil_recovery_s: float = 1.2
+    recoil_max_deg: float = 20.0
     cover_height: float = 0.25
     duck_margin: float = 0.015
     max_ammo: int = 3
