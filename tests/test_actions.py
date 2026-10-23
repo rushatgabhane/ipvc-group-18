@@ -120,3 +120,20 @@ def test_ignored_fists_report_why():
     assert frames[3].ignored_fist == "aim settling"
     frames = run(PlayerActions(CFG), [sig(aim=False)] * 5 + [sig(aim=False, hand=FIST)])
     assert frames[5].ignored_fist == "not aiming"
+
+
+def test_rapid_shots_lose_accuracy_and_recover():
+    def fire_burst(gap_frames):
+        actions = PlayerActions(CFG, seed=1)
+        sequence = [sig()] * 15
+        for _ in range(3):
+            sequence += [sig(hand=FIST)] + [sig()] * gap_frames
+        frames = run(actions, sequence)
+        shots = [f.shot for f in frames if f.shot is not None]
+        return [abs(np.degrees(np.arctan2(s.direction[1], s.direction[0]))) for s in shots], frames
+
+    burst, frames = fire_burst(int(CFG.fire_cooldown_s / DT) + 1)
+    assert len(burst) == 3 and burst[0] < 1e-3
+    assert max(f.spread_deg for f in frames) > 5
+    spaced, _ = fire_burst(int(2 * CFG.recoil_recovery_s / DT))
+    assert len(spaced) == 3 and max(spaced) < 1e-3

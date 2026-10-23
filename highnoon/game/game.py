@@ -361,12 +361,12 @@ class Game:
                 lands_on_player = kind in ("head", "body", "powerup") or (
                     kind == "cover" and target is not None
                 )
-                self.aims[player.id] = Aim(origin, path[-1], lands_on_player, path)
+                self.aims[player.id] = Aim(origin, path[-1], lands_on_player, path, state.frame.spread_deg)
             else:
                 distance, (kind, _) = self._cast(player.id, origin, direction)
-                self.aims[player.id] = Aim(
-                    origin, origin + direction * distance, kind in ("head", "body", "powerup")
-                )
+                end = origin + direction * distance
+                on_target = kind in ("head", "body", "powerup")
+                self.aims[player.id] = Aim(origin, end, on_target, None, state.frame.spread_deg)
 
     def _update_powerup(self, t: float) -> None:
         if self.powerup is not None and t >= self.powerup.t_end:

@@ -111,3 +111,4 @@ class Aim:
     end: np.ndarray
     on_target: bool
     path: np.ndarray | None = None
+    spread_deg: float = 0.0

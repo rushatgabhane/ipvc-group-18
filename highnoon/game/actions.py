@@ -27,6 +27,7 @@ class ActionFrame:
     head_pos: float = 0.0
     hand_closed: bool | None = None
     ignored_fist: str | None = None
+    spread_deg: float = 0.0
 
 
 @dataclass(slots=True)
@@ -37,8 +38,11 @@ class AimSample:
 
 
 class PlayerActions:
-    def __init__(self, cfg: GameConfig):
+    def __init__(self, cfg: GameConfig, seed: int = 0):
         self.cfg = cfg
+        self._rng = np.random.default_rng(seed)
+        self._recoil_deg = 0.0
+        self._recoil_t = 0.0
         self._recent_aims: deque[AimSample] = deque()
         self._aiming_since: float | None = None
         self._last_shot_t = -math.inf
@@ -57,6 +61,7 @@ class PlayerActions:
         reload, reload_progress = self._update_reload(t)
         aiming, shot, ignored_fist = self._update_trigger(signals, t)
         return ActionFrame(
+            spread_deg=self.spread_at(t),
             ignored_fist=ignored_fist,
             aiming=aiming,
             ducked=self.ducked,
@@ -111,7 +116,17 @@ class PlayerActions:
             return True, None, blocker
         self._last_shot_t = t
         steady_aim = self._recent_aims[0]
-        return True, Shot(steady_aim.origin.copy(), steady_aim.direction.copy()), None
+        return True, Shot(steady_aim.origin.copy(), self._apply_recoil(steady_aim.direction, t)), None
+
+    def spread_at(self, t: float) -> float:
+        recovery_per_s = self.cfg.recoil_per_shot_deg / self.cfg.recoil_recovery_s
+        return max(0.0, self._recoil_deg - (t - self._recoil_t) * recovery_per_s)
+
+    def _apply_recoil(self, direction: np.ndarray, t: float) -> np.ndarray:
+        spread = self.spread_at(t)
+        self._recoil_deg = min(self.cfg.recoil_max_deg, spread + self.cfg.recoil_per_shot_deg)
+        self._recoil_t = t
+        return rotate(direction, math.radians(self._rng.uniform(-spread, spread)))
 
     def _fire_blocker(self, t: float, held_open: bool) -> str | None:
         if t - self._aiming_since < self.cfg.armed_after_s:
@@ -142,3 +157,9 @@ class PlayerActions:
         if self._hand_closed:
             self._hand_open_since = None
         return just_closed, held_open
+
+
+def rotate(direction: np.ndarray, angle: float) -> np.ndarray:
+    c, s = math.cos(angle), math.sin(angle)
+    x, y = float(direction[0]), float(direction[1])
+    return np.array([x * c - y * s, x * s + y * c], np.float32)

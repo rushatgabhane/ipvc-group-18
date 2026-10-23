@@ -151,6 +151,10 @@ class WorldView:
         cv2.circle(image, center, radius + 2, BLACK, 3, cv2.LINE_AA)
         draw_crosshair(image, center, radius, color, t * (3.0 if aim.on_target else 1.0), 0.55, 1.45, 2)
         cv2.circle(image, center, 2, color, -1, cv2.LINE_AA)
+        spread_px = int(np.linalg.norm(aim.end - aim.origin) * math.tan(math.radians(aim.spread_deg)))
+        if spread_px > radius:
+            cv2.circle(image, center, spread_px + 1, BLACK, 3, cv2.LINE_AA)
+            cv2.circle(image, center, spread_px, color, 2, cv2.LINE_AA)
 
 
 def unit(vector: np.ndarray) -> np.ndarray:
