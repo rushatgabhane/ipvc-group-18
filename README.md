@@ -201,7 +201,7 @@ highnoon/
   render/
     renderer.py        background compositing, wall, layer order, debug overlay (T5)
     world.py           held weapons, rocket/grenade arc previews, tracers, powerups, rockets, grenades, explosions
-    hud.py             name tags, HUD cards, banner, winner screen, announcements
+    hud.py             name tags, HUD cards, winner screen, announcements
     palette.py         shared colours
     assets.py          sprites (cached blend weights), procedural scenery, cached TrueType text
     fx.py              particles, floating numbers, queued announcements, screen shake

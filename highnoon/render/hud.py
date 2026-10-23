@@ -17,12 +17,6 @@ TAG_FOLLOW = 0.35
 HP_EASE_PER_S = 6.0
 HP_TRAIL_PER_S = 40.0
 HIT_FLASH_S = 0.25
-DUEL_HINT = "CLOSE YOUR HAND TO SHOOT  |  DUCK TO RELOAD  |  SHOOT POWERUPS  |  FIRST TO ZERO LOSES"
-BANNERS = {
-    "idle": ("HIGH NOON", "TWO PLAYERS: STEP INTO VIEW"),
-    "countdown": ("GET READY", "STAY IN VIEW"),
-    "duel": ("DUEL", DUEL_HINT),
-}
 RELOAD_WARNING = "DUCK TO RELOAD!"
 RELOAD_WARNING_SIZE = 40
 GET_UP_WARNING = "GET UP!"
@@ -68,8 +62,6 @@ class Hud:
         self._waiting_sprites(scale)
         for player_id in self.colors:
             self._come_back_sprite(player_id, scale)
-        for mode in BANNERS:
-            self._banner_sprites(mode, scale)
         for number in range(1, 4):
             self._countdown_sprite(number, scale)
         for seconds_left in range(5):
@@ -84,13 +76,6 @@ class Hud:
         return self.text.get(
             text, int(size * scale), color, TITLE_FONT, stroke=4, stroke_color=(20, 25, 40), shadow=5
         )
-
-    def _banner_sprites(self, mode: str, scale: float):
-        title, hint = BANNERS[mode]
-        title_sprite = self.text.get(
-            title, int(30 * scale), GOLD, TITLE_FONT, stroke=2, stroke_color=(20, 30, 50)
-        )
-        return title_sprite, self.text.get(hint, int(19 * scale), CREAM, HUD_FONT)
 
     def _countdown_sprite(self, number: int, scale: float):
         return self._announcement_sprite(str(number), COUNTDOWN_SIZE, COUNTDOWN_COLOR, scale)
@@ -112,7 +97,6 @@ class Hud:
             self._draw_card(image, game, player, t, scale, round_over)
         if not round_over:
             self._draw_reload_warnings(image, game, visible, t, scale)
-        self._draw_banner(image, game, scale)
         if self._winner_revealed(game, t):
             self._draw_winner(image, game, t, scale)
         if game.mode == "countdown":
@@ -323,17 +307,6 @@ class Hud:
         if state.ammo == 0 and game.winner is None and int(t * 3) % 2 == 0:
             hint = self.text.get("DUCK TO RELOAD", int(20 * scale), GOLD, HUD_FONT)
             blit(image, hint, x0 + card_w - hint.width - int(12 * scale), y0 + int(68 * scale))
-
-    def _draw_banner(self, image, game: Game, scale: float) -> None:
-        width = image.shape[1]
-        title_sprite, hint_sprite = self._banner_sprites(game.mode, scale)
-        panel_w = max(title_sprite.width, hint_sprite.width) + int(40 * scale)
-        panel_h = title_sprite.height + hint_sprite.height + int(10 * scale)
-        x0, y0 = width // 2 - panel_w // 2, int(10 * scale)
-        panel(image, x0, y0, x0 + panel_w, y0 + panel_h, r=int(16 * scale), opacity=0.55)
-        title_y = y0 + int(4 * scale) + title_sprite.height / 2
-        blit_center(image, title_sprite, width / 2, title_y)
-        blit_center(image, hint_sprite, width / 2, title_y + title_sprite.height / 2 + hint_sprite.height / 2)
 
     def _winner_revealed(self, game: Game, t: float) -> bool:
         if game.winner is None:
