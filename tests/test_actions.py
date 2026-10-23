@@ -49,7 +49,7 @@ def test_fist_needs_open_hand_first_and_steady_aim():
 
 
 def test_fist_hysteresis_and_lost_hand():
-    wobble = [sig(hand=h) for h in (1.4, 1.3, None, 1.45, 1.35)]
+    wobble = [sig(hand=h) for h in (1.4, 1.3, None, 1.42, 1.35)]
     assert shot_frames(run(PlayerActions(CFG), [sig()] * 15 + wobble)) == []
 
 
@@ -97,11 +97,6 @@ def test_rapid_fist_spam_is_blocked():
     fired = shot_frames(frames)
     assert fired[0] == 15
     assert all(b - a >= CFG.fire_cooldown_s / DT for a, b in zip(fired, fired[1:], strict=False))
-
-
-def test_hand_must_stay_open_before_next_shot():
-    blink = [sig()] * 15 + [sig(hand=FIST)] * 20 + [sig()] * 2 + [sig(hand=FIST)]
-    assert shot_frames(run(PlayerActions(CFG), blink)) == [15]
 
 
 def test_can_shoot_right_after_standing_up_with_arm_ready():

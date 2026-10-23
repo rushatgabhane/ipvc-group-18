@@ -139,6 +139,21 @@ Removed to keep the code small: the flick trigger, the OpenCV window backend (16
 for pyglet), and the benchmark-only switches (`--sequential`, `--pose-model full`, `--no-face`,
 `--no-seg`, inline hands, `tools/bench_models.py`). The measurements they produced are kept above.
 
+### 8c. Hand tracking fixed from a recorded two-player session
+A 149 s two-player session was recorded (`--record`, `--signals-csv`) and replayed with hand
+detection on every frame. Findings: the hand model saw 2 hands in most frames, its limit with
+`max_hands = 2`, so with 4 hands in view P2's shooting hand was often not tracked (63% of aiming
+frames, gaps up to 7.7 s). Open hands clustered at 1.6-1.8 openness with many at 1.5-1.6, just under
+the old 1.55 "open" threshold, and the 0.15 s open-hand hold rejected 53 fists.
+
+| Replay of the session | P1 tracked | P2 tracked | P1 fired | P2 fired | hand model |
+|---|---|---|---|---|---|
+| max_hands 2, open > 1.55, open hold 0.15 s | 92% | 63% | 46 | 39 | 30 ms |
+| max_hands 4, open > 1.45, no open hold | 96% | 81% | 67 | 66 | 50 ms |
+
+Real-time replay with the new settings: 29.9 fps, 0 dropped frames, render 3.3 ms, hand results
+2.1 frames old on average (was 1.0). Rapid-fire spam is handled by the cooldown and recoil spread.
+
 ### 9. Newest-frame-only capture
 The capture thread overwrites a single slot instead of filling a queue. If any stage gets slow,
 frames are dropped (logged as `dropped`) rather than delayed, so latency cannot accumulate.

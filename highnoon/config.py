@@ -21,7 +21,7 @@ class CaptureConfig:
 @dataclass
 class PerceptionConfig:
     max_players: int = 2
-    max_hands: int = 2
+    max_hands: int = 4
     delegate: str = "auto"
     min_detection_confidence: float = 0.5
     min_presence_confidence: float = 0.5
@@ -48,11 +48,10 @@ class TrackingConfig:
 @dataclass
 class GameConfig:
     fist_closed: float = 1.25
-    fist_open: float = 1.55
+    fist_open: float = 1.45
     aim_lookback_s: float = 0.1
     armed_after_s: float = 0.3
     fire_cooldown_s: float = 0.6
-    open_hand_s: float = 0.15
     recoil_per_shot_deg: float = 8.0
     recoil_recovery_s: float = 1.0
     recoil_max_deg: float = 16.0

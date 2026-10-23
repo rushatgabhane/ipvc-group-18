@@ -47,7 +47,6 @@ class PlayerActions:
         self._aiming_since: float | None = None
         self._last_shot_t = -math.inf
         self._hand_closed: bool | None = None
-        self._hand_open_since: float | None = None
         self._ducked_since: float | None = None
         self._reloaded_this_duck = False
         self.ducked = False
@@ -99,7 +98,7 @@ class PlayerActions:
         self._aiming_since = None
 
     def _update_trigger(self, signals: MotionSignals, t: float) -> tuple[bool, Shot | None, str | None]:
-        fist_closed, held_open = self._update_hand(signals.hand_openness, t)
+        fist_closed = self._update_hand(signals.hand_openness)
         if not signals.aim_valid:
             self._stop_aiming()
             return False, None, "not aiming" if fist_closed else None
@@ -111,7 +110,7 @@ class PlayerActions:
         self._remember_aim(AimSample(t, signals.aim_origin, signals.aim_dir))
         if not fist_closed:
             return True, None, None
-        blocker = self._fire_blocker(t, held_open)
+        blocker = self._fire_blocker(t)
         if blocker is not None:
             return True, None, blocker
         self._last_shot_t = t
@@ -128,13 +127,11 @@ class PlayerActions:
         self._recoil_t = t
         return rotate(direction, math.radians(self._rng.uniform(-spread, spread)))
 
-    def _fire_blocker(self, t: float, held_open: bool) -> str | None:
+    def _fire_blocker(self, t: float) -> str | None:
         if t - self._aiming_since < self.cfg.armed_after_s:
             return "aim settling"
         if t - self._last_shot_t < self.cfg.fire_cooldown_s:
             return "cooldown"
-        if not held_open:
-            return "hand open too briefly"
         return None
 
     def _remember_aim(self, sample: AimSample) -> None:
@@ -142,21 +139,15 @@ class PlayerActions:
         while sample.t - self._recent_aims[0].t > self.cfg.aim_lookback_s:
             self._recent_aims.popleft()
 
-    def _update_hand(self, openness: float | None, t: float) -> tuple[bool, bool]:
+    def _update_hand(self, openness: float | None) -> bool:
         if openness is None:
-            return False, False
+            return False
         was_closed = self._hand_closed
         if openness < self.cfg.fist_closed:
             self._hand_closed = True
         elif openness > self.cfg.fist_open:
             self._hand_closed = False
-        if self._hand_closed is False and was_closed is not False:
-            self._hand_open_since = t
-        held_open = self._hand_open_since is not None and t - self._hand_open_since >= self.cfg.open_hand_s
-        just_closed = was_closed is False and self._hand_closed is True
-        if self._hand_closed:
-            self._hand_open_since = None
-        return just_closed, held_open
+        return was_closed is False and self._hand_closed is True
 
 
 def rotate(direction: np.ndarray, angle: float) -> np.ndarray:
