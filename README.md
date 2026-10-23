@@ -100,9 +100,10 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 
   | Powerup | Effect |
   |---|---|
-  | **+HP** (red cross) | +35 HP, up to 100 |
-  | **SHIELD** (blue) | Absorbs the next hit. Lasts until it is hit or the round ends |
+  | **FULL HP** (red cross) | HP back to 100 |
   | **2X DAMAGE** (gold) | Your hits do double damage for 10 s |
+  | **ROCKET LAUNCHER** (orange) | Your next shot is a rocket on a ballistic arc (a dotted preview shows where it lands). It explodes on impact, and the blast reaches over the wall: 50 damage at the centre, 20 at the edge |
+  | **GRENADE** (green) | Your next shot lobs a grenade at your opponent, wherever they move. If they are not ducked when it lands 1.4 s later, they die |
 
 All thresholds are in `GameConfig` (`highnoon/config.py`). Set `trigger = "flick"` to fire with an
 upward recoil flick of the arm instead of a fist (useful when standing too far away for hand tracking).

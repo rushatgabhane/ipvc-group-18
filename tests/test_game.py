@@ -151,31 +151,91 @@ def test_shooting_a_powerup_gives_it_to_the_shooter():
     up = (1.0, -1.0)  # 45 degrees up from P1's hand, away from P2
     t = step(game, lambda: [make_player(1, 300, aim_dir=up), make_player(2, 900)], 20, 0.0)
     hand = make_player(1, 300, aim_dir=up).signals.aim_origin
-    put_powerup(game, "shield", hand + np.array([150.0, -150.0]), t)
+    put_powerup(game, "double", hand + np.array([150.0, -150.0]), t)
     t = shoot(game, up, t)
     assert game.powerup is None
-    assert game.states[1].shield and not game.states[2].shield
-    assert any(e.kind == "pickup" and e.player == 1 and e.detail == "shield" for e in game.effects)
+    assert game.double_active(1) and not game.double_active(2)
+    assert any(e.kind == "pickup" and e.player == 1 and e.detail == "double" for e in game.effects)
 
 
-def test_shield_absorbs_one_hit_and_double_damage_doubles():
+def test_double_damage_doubles():
     game = Game(GameConfig(trigger="flick"), (1280, 720))
     aim = (1.0, 0.0)
     t = step(game, lambda: [make_player(1, 300, aim_dir=aim), make_player(2, 900)], 20, 0.0)
-    game.states[2].shield = True
-    t = shoot(game, aim, t)
-    assert game.states[2].hp == 100 and not game.states[2].shield
     game.states[1].double_until = t + 10
-    t = shoot(game, aim, t + 1.0)
+    t = shoot(game, aim, t)
     assert game.states[2].hp == 100 - 2 * game.cfg.body_damage
 
 
-def test_heal_is_capped():
+def test_heal_restores_full_hp():
     game = Game(GameConfig(trigger="flick"), (1280, 720))
     up = (1.0, -1.0)
     t = step(game, lambda: [make_player(1, 300, aim_dir=up), make_player(2, 900)], 20, 0.0)
-    game.states[1].hp = 80
+    game.states[1].hp = 10
     hand = make_player(1, 300, aim_dir=up).signals.aim_origin
     put_powerup(game, "heal", hand + np.array([150.0, -150.0]), t)
     shoot(game, up, t)
     assert game.states[1].hp == game.cfg.max_hp
+
+
+def fire_once(game, players_fn, aim, t):
+    """P1 fires one flick shot along `aim` while `players_fn(aim_dir)` gives the players."""
+    for d in flick_dirs(aim):
+        t = step(game, lambda d=d: players_fn(d), 1, t)
+    return step(game, lambda: players_fn(aim), 1, t)
+
+
+def test_rocket_flies_an_arc_and_uses_no_ammo():
+    game = Game(GameConfig(trigger="flick"), (1280, 720))
+    aim = (1.0, 0.0)
+    players = lambda d: [make_player(1, 300, aim_dir=d), make_player(2, 900)]  # noqa: E731
+    t = step(game, lambda: players(aim), 20, 0.0)
+    game.states[1].rockets = 1
+    t = step(game, lambda: players(aim), 1, t)
+    path = game.aims[1].path
+    assert path is not None and path[-1][1] > path[0][1] + 5  # the preview arc drops
+    t = fire_once(game, players, aim, t)
+    assert game.states[1].rockets == 0 and game.states[1].ammo == game.cfg.max_ammo
+    assert len(game.rockets) == 1 and not game.bullets
+    r = game.rockets[0]
+    assert r.at(r.t_fire + 0.3)[1] > r.origin[1]  # gravity pulls it below the aim line
+    t = step(game, lambda: players(aim), 15, t)
+    assert not game.rockets
+    assert any(e.kind == "explosion" for e in game.effects)
+    assert game.states[2].hp <= 100 - game.cfg.rocket_min_damage
+
+
+def test_rocket_blast_reaches_a_ducked_player():
+    game = Game(GameConfig(trigger="flick"), (1280, 720))
+    low = (1.0, 0.45)  # down toward the wall in front of P2
+    players = lambda d: [make_player(1, 300, aim_dir=d), make_player(2, 900, shoulder_y=650)]  # noqa: E731
+    t = step(game, lambda: players(low), 20, 0.0)
+    assert game.states[2].frame.ducked
+    game.states[1].rockets = 1
+    t = fire_once(game, players, low, t)
+    t = step(game, lambda: players(low), 40, t)
+    assert game.states[2].hp < 100
+
+
+def throw_grenade(p2_shoulder_y: float):
+    game = Game(GameConfig(trigger="flick"), (1280, 720))
+    aim = (1.0, -1.0)  # aim does not matter
+    players = lambda d: [make_player(1, 300, aim_dir=d), make_player(2, 900, shoulder_y=p2_shoulder_y)]  # noqa: E731
+    t = step(game, lambda: players(aim), 20, 0.0)
+    game.states[1].grenades = 1
+    t = fire_once(game, players, aim, t)
+    assert len(game.grenades) == 1 and game.states[1].ammo == game.cfg.max_ammo
+    step(game, lambda: players(aim), int(game.cfg.grenade_flight_s / DT) + 2, t)
+    assert not game.grenades
+    return game
+
+
+def test_grenade_kills_a_standing_player():
+    game = throw_grenade(300.0)
+    assert game.states[2].hp == 0 and game.winner == 1
+
+
+def test_grenade_spares_a_ducked_player():
+    game = throw_grenade(650.0)
+    assert game.states[2].hp == 100 and game.winner is None
+    assert any(e.kind == "safe" for e in game.effects)

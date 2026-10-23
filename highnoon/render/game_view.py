@@ -3,10 +3,12 @@
 Layer order, back to front:
   1. players (already composited onto the backdrop by the renderer)
   2. the wall, which occludes the lower body, so a ducking player disappears behind it
-  3. the flying powerup, particles
-  4. additive glow layer: laser sights, tracers, muzzle flashes
-  5. reticles, name tags above heads, floating numbers
-  6. HUD cards, banner, announcements
+  3. the flying powerup, particles (incl. rocket/grenade smoke trails)
+  4. additive glow layer: laser sights, rocket arc previews, tracers, rocket flames, muzzle
+     flashes, explosion fireballs
+  5. rockets, grenades, explosion shockwaves, grenade warnings
+  6. reticles, name tags above heads, floating numbers
+  7. HUD cards, banner, announcements
 
 Glow is drawn into one black layer and added with cv2.add (one full-frame op). Text comes from
 the sprite cache in assets.py. Everything else uses OpenCV primitives on small regions.
@@ -27,6 +29,8 @@ from highnoon.render.fx import FX
 
 WHITE, BLACK = (255, 255, 255), (0, 0, 0)
 GOLD, RED, CREAM = (70, 200, 255), (60, 60, 235), (215, 240, 250)
+ORANGE = (30, 140, 255)
+EXPLOSION_S = 0.55  # fireball + shockwave duration
 TAG_FOLLOW = 0.35  # name tags lerp toward the head each frame (removes jitter)
 HP_DRAIN = 6.0  # displayed HP catches up with real HP at this rate (1/s)
 
@@ -68,8 +72,11 @@ class GameView:
         visible = [p for p in players if p.visible and game.states.get(p.id) is not None]
 
         self._draw_powerup(image, game, t, s)
+        self._emit_trails(game, dt)
         self._draw_particles(image)
         self._draw_glow(image, game, t, s)
+        self._draw_projectiles(image, game, t, s)
+        self._draw_grenade_warnings(image, game, players, t, s)
         for pid, aim in game.aims.items():
             self._draw_reticle(image, aim, pid, t, s)
         for p in visible:
@@ -113,7 +120,8 @@ class GameView:
 
     def _draw_glow(self, image, game: Game, t: float, s: float) -> None:
         muzzles = [e for e in game.effects if e.kind == "muzzle" and t - e.t < 0.09]
-        if not (game.aims or game.bullets or muzzles):
+        blasts = [e for e in game.effects if e.kind == "explosion" and t - e.t < EXPLOSION_S]
+        if not (game.aims or game.bullets or muzzles or game.rockets or blasts):
             return
         if self._glow is None or self._glow.shape != image.shape:
             self._glow = np.zeros_like(image)
@@ -122,6 +130,18 @@ class GameView:
         for pid, aim in game.aims.items():
             col = np.array(RED if aim.on_target else self.colors.get(pid, WHITE), np.float32)
             pulse = 0.85 + 0.15 * math.sin(t * 9)
+            if aim.path is not None:  # rocket: dotted arc preview, dots marching toward the impact
+                col = np.array(RED if aim.on_target else ORANGE, np.float32)
+                phase = int(t * 12) % 2
+                for i, pt in enumerate(aim.path[1:-1]):
+                    if i % 2 == phase:
+                        cv2.circle(
+                            glow, _pt(pt), max(3, int(6 * s)), tuple((col * 0.35).tolist()), -1, cv2.LINE_AA
+                        )
+                        cv2.circle(
+                            glow, _pt(pt), max(2, int(3 * s)), tuple((col * 0.9).tolist()), -1, cv2.LINE_AA
+                        )
+                continue
             outer = tuple((col * 0.30 * pulse).tolist())
             cv2.line(glow, _pt(aim.origin), _pt(aim.end), outer, max(2, int(7 * s)), cv2.LINE_AA)
             cv2.line(glow, _pt(aim.origin), _pt(aim.end), tuple((col * 0.85).tolist()), max(1, int(2 * s)),
@@ -133,12 +153,91 @@ class GameView:
             cv2.line(glow, _pt(tail), _pt(head), (30, 110, 160), max(3, int(12 * s)), cv2.LINE_AA)
             cv2.line(glow, _pt(tail), _pt(head), (90, 210, 255), max(2, int(4 * s)), cv2.LINE_AA)
             cv2.line(glow, _pt(tail), _pt(head), (255, 255, 255), 1, cv2.LINE_AA)
+        for r in game.rockets:  # exhaust flame behind the rocket
+            heading = r.heading(t)
+            back = -heading / max(float(np.linalg.norm(heading)), 1e-6)
+            flicker = 0.8 + 0.2 * math.sin(t * 60)
+            for dist, rad, col in (
+                (44, 22, (20, 70, 140)),
+                (36, 13, (40, 150, 255)),
+                (30, 7, (180, 240, 255)),
+            ):
+                c = r.pos + back * dist * s
+                cv2.circle(glow, _pt(c), int(rad * s * flicker), col, -1, cv2.LINE_AA)
+        for e in blasts:  # fireball: bright core that swells, cools to orange-red and fades
+            k = (t - e.t) / EXPLOSION_S
+            big = 1.4 if e.detail == "grenade" else 1.0
+            radius = game.cfg.rocket_blast_radius * image.shape[0] * big
+            fade = (1 - k) ** 1.5
+            for scale, col in ((1.0, (20, 60, 200)), (0.75, (30, 140, 255)), (0.45, (170, 235, 255))):
+                rr = int(radius * scale * (0.35 + 0.75 * math.sqrt(k)))
+                cv2.circle(glow, _pt(e.pos), rr, tuple(int(c * fade) for c in col), -1, cv2.LINE_AA)
         for e in muzzles:
             k = 1 - (t - e.t) / 0.09
             for r, inten in ((46, 0.25), (30, 0.5), (16, 1.0)):
                 color = (int(120 * inten * k), int(220 * inten * k), int(255 * inten * k))
                 cv2.circle(glow, _pt(e.pos), int(r * s * (0.6 + 0.4 * k)), color, -1, cv2.LINE_AA)
         cv2.add(image, glow, dst=image)
+
+    def _emit_trails(self, game: Game, dt: float) -> None:
+        """Smoke puffs behind rockets and a spark fuse trail behind grenades, a few per frame."""
+        if dt <= 0:
+            return
+        p = self.fx.particles
+        for r in game.rockets:
+            heading = r.heading(self._t_last)
+            back = -heading / max(float(np.linalg.norm(heading)), 1e-6)
+            tail = r.pos + back * 34
+            direction = math.atan2(back[1], back[0])
+            p.burst(tail, 3, (150, 150, 155), speed=(10, 60), life=(0.5, 0.9), size=(5, 9), gravity=False,
+                    spread=1.2, direction=direction, jitter=0.25)  # fmt: skip
+            p.burst(tail, 2, (40, 160, 255), speed=(80, 200), life=(0.05, 0.15), size=(2, 4), gravity=False,
+                    spread=0.6, direction=direction)  # fmt: skip
+        for g in game.grenades:
+            p.burst(g.pos, 2, (100, 220, 255), speed=(30, 120), life=(0.15, 0.35), size=(1, 3))
+            p.burst(g.pos, 1, (120, 120, 125), speed=(5, 30), life=(0.4, 0.7), size=(4, 7), gravity=False)
+
+    def _draw_projectiles(self, image, game: Game, t: float, s: float) -> None:
+        h = image.shape[0]
+        for r in game.rockets:
+            heading = r.heading(t)
+            angle = -math.degrees(math.atan2(heading[1], heading[0]))
+            sprite = assets.rotated(assets.rocket_sprite(int(0.13 * h)), angle)
+            blit_center(image, sprite, r.pos[0], r.pos[1])
+        for g in game.grenades:
+            sprite = assets.rotated(assets.grenade_sprite(int(0.075 * h)), -(t - g.t_throw) * 540)
+            blit_center(image, sprite, g.pos[0], g.pos[1])
+        for e in game.effects:  # shockwave rings, drawn on top of the fireball
+            if e.kind != "explosion" or t - e.t >= EXPLOSION_S:
+                continue
+            k = (t - e.t) / EXPLOSION_S
+            big = 1.4 if e.detail == "grenade" else 1.0
+            radius = int(game.cfg.rocket_blast_radius * h * big * (0.3 + 1.2 * k))
+            thick = max(1, int(10 * s * (1 - k)))
+            cv2.circle(image, _pt(e.pos), radius, CREAM, thick, cv2.LINE_AA)
+            if k < 0.5:
+                cv2.circle(image, _pt(e.pos), int(radius * 0.7), WHITE, max(1, thick // 2), cv2.LINE_AA)
+
+    def _draw_grenade_warnings(self, image, game: Game, players: list[Player], t: float, s: float) -> None:
+        """Flashing target ring and DUCK! over whoever a grenade is coming for."""
+        for g in game.grenades:
+            st = game.states.get(g.target)
+            safe = st is not None and st.frame.ducked
+            color = (140, 240, 160) if safe else RED
+            urgency = 4 + 10 * g.progress(t)  # flashes faster as it comes down
+            if not safe and int(t * urgency) % 2:
+                continue
+            c = _pt(g.landing)
+            r = int((34 + 10 * math.sin(t * 14)) * s)
+            cv2.circle(image, c, r + 2, BLACK, max(3, int(5 * s)), cv2.LINE_AA)
+            cv2.circle(image, c, r, color, max(2, int(3 * s)), cv2.LINE_AA)
+            for k in range(4):
+                a = k * math.pi / 2 + t * 2
+                p0 = (int(c[0] + math.cos(a) * r * 0.5), int(c[1] + math.sin(a) * r * 0.5))
+                p1 = (int(c[0] + math.cos(a) * r * 1.3), int(c[1] + math.sin(a) * r * 1.3))
+                cv2.line(image, p0, p1, color, max(2, int(3 * s)), cv2.LINE_AA)
+            text = self.text.get("SAFE" if safe else "DUCK!", int(46 * s), color, TITLE_FONT, stroke=3)
+            blit_center(image, text, c[0], c[1] - r - 30 * s)
 
     def _draw_reticle(self, image, aim, pid: int, t: float, s: float) -> None:
         color = RED if aim.on_target else self.colors.get(pid, WHITE)
@@ -186,13 +285,16 @@ class GameView:
         frac = self._hp_shown.get(p.id, st.hp) / game.cfg.max_hp
         if frac > 0.01:
             rounded_rect(image, bx, by, bx + max(bh, int(bw * frac)), by + bh, bh // 2, _hp_color(frac))
-        if st.shield and p.face is not None:  # bubble around the head while the shield is up
-            fx0, fy0, fx1, fy1 = p.face.bbox
-            r = int(0.65 * max(fx1 - fx0, fy1 - fy0))
-            centre = (int((fx0 + fx1) / 2), int((fy0 + fy1) / 2))
-            cv2.circle(image, centre, r, assets.POWERUP_COLORS["shield"], max(2, int(4 * s)), cv2.LINE_AA)
-        badges = [b for b, on in (("DUCKED", st.frame.ducked), ("SHIELD", st.shield),
-                                  ("2X", game.double_active(p.id))) if on]  # fmt: skip
+        badges = [
+            b
+            for b, on in (
+                ("DUCKED", st.frame.ducked),
+                ("2X", game.double_active(p.id)),
+                ("ROCKET", st.rockets > 0),
+                ("GRENADE", st.grenades > 0),
+            )  # fmt: skip
+            if on
+        ]
         if badges:
             badge = self.text.get("  ".join(badges), int(22 * s), CREAM, HUD_FONT, stroke=2)
             blit_center(image, badge, cx, by + bh + 16 * s)
@@ -261,11 +363,13 @@ class GameView:
                 blit(image, icon, ix, y0 + int(66 * s))
                 ix += int(icon.shape[1] + 5 * s)
             status = []
-            if st.shield:
-                status.append(("SHIELD", assets.POWERUP_COLORS["shield"]))
             if game.double_active(p.id):
                 left = math.ceil(st.double_until - t)
                 status.append((f"2X {left}S", assets.POWERUP_COLORS["double"]))
+            if st.rockets:
+                status.append(("ROCKET", assets.POWERUP_COLORS["rocket"]))
+            if st.grenades:
+                status.append(("GRENADE", assets.POWERUP_COLORS["grenade"]))
             ix += int(10 * s)
             for text, col in status:
                 sprite = self.text.get(text, int(20 * s), col, HUD_FONT)
@@ -339,8 +443,7 @@ def draw_signal_debug(image: np.ndarray, game: Game, players: list[Player], colo
         lines = [
             f"arm {s.extension:4.2f}  elev {np.degrees(s.elevation):+4.0f} (aim -50..80)",
             f"aim {'ON' if f.aiming else 'off'}  head {f.head_pos:.2f} (duck > {1 - cfg.cover_height:.2f})",
-            f"ammo {st.ammo}  shield {'ON' if st.shield else 'off'}"
-            f"  2x {'ON' if game.double_active(p.id) else 'off'}",
+            f"ammo {st.ammo}  2x {'ON' if game.double_active(p.id) else 'off'}",
             "hand: not tracked"
             if s.hand_openness is None
             else f"hand {s.hand_openness:4.2f} {'FIST' if f.hand_closed else 'open'}"

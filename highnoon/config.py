@@ -109,8 +109,20 @@ class GameConfig:
     powerup_interval_s: float = 30.0
     powerup_rise_s: float = 1.8
     powerup_radius: float = 0.045  # fraction of screen height
-    heal_hp: int = 35
     double_damage_s: float = 10.0
+    # Rocket launcher powerup: the next shot is a rocket that flies a ballistic arc (launched along
+    # the aim, pulled down by gravity) and explodes on the first thing it meets. The blast ignores
+    # the wall, so it is the answer to a player hiding behind cover. Damage falls off linearly from
+    # rocket_damage at the impact to rocket_min_damage at the blast edge.
+    rocket_speed: float = 1.6  # screen heights per second at launch
+    rocket_gravity: float = 1.3  # screen heights per second^2
+    rocket_blast_radius: float = 0.16  # fraction of screen height
+    rocket_damage: int = 50
+    rocket_min_damage: int = 20
+    # Grenade powerup: the next shot lobs a grenade at the opponent. It homes in on them, so moving
+    # does not help; if they are not ducked when it lands after grenade_flight_s, they die.
+    grenade_flight_s: float = 1.4
+    grenade_arc: float = 0.45  # peak height of the lob above the straight line, in screen heights
 
 
 @dataclass

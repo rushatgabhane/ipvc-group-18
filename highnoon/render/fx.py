@@ -136,9 +136,23 @@ class FX:
                     spread=np.pi * 0.9, direction=-np.pi / 2)  # fmt: skip
             p.burst(pos, 8, (150, 230, 255), speed=(80, 200), life=(0.05, 0.15), size=(2, 3), gravity=False)
             self.texts.append(FloatText("BLOCKED", pos.copy(), t, (180, 220, 255), 32, 0.7))
-        elif e.kind == "shielded":
-            p.burst(pos, 26, (240, 190, 90), speed=(150, 400), life=(0.2, 0.5), size=(2, 4), gravity=False)
-            self.texts.append(FloatText("SHIELDED", pos.copy(), t, (255, 210, 130), 40))
+        elif e.kind == "explosion":
+            big = 1.4 if e.detail == "grenade" else 1.0
+            n = lambda k: int(k * big)  # noqa: E731
+            p.burst(
+                pos, n(30), (210, 245, 255), speed=(300, 750), life=(0.08, 0.22), size=(3, 6), gravity=False
+            )
+            p.burst(pos, n(55), (40, 150, 255), speed=(150, 600), life=(0.3, 0.7), size=(4, 9), gravity=False)
+            p.burst(pos, n(30), (30, 70, 225), speed=(100, 420), life=(0.4, 0.8), size=(3, 8))
+            p.burst(pos, n(24), (120, 225, 255), speed=(450, 900), life=(0.3, 0.6), size=(1, 3))  # sparks
+            p.burst(pos, n(30), (70, 72, 78), speed=(30, 170), life=(0.8, 1.6), size=(7, 14), gravity=False,
+                    spread=np.pi, direction=-np.pi / 2)  # fmt: skip
+            self._shake_t, self._shake_amp = t, 22.0 * big
+            self.announce("BOOM!", t, (40, 150, 255), size=int(120 * big), duration=0.9)
+        elif e.kind == "grenade":
+            self.announce("GRENADE! DUCK!", t, (60, 60, 240), size=84, duration=1.3)
+        elif e.kind == "safe":
+            self.texts.append(FloatText("SAFE!", pos.copy(), t, (140, 240, 160), 52))
         elif e.kind == "pickup":
             color = POWERUP_COLORS[e.detail]
             p.burst(pos, 40, color, speed=(150, 500), life=(0.3, 0.8), size=(2, 6))

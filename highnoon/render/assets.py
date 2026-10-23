@@ -168,13 +168,18 @@ def bullet_icon(height: int, filled: bool) -> np.ndarray:
     return cv2.resize(img, (W // s, H // s), interpolation=cv2.INTER_AREA)
 
 
-POWERUP_COLORS = {"heal": (70, 70, 225), "shield": (230, 165, 60), "double": (40, 190, 250)}
-POWERUP_LABELS = {"heal": "+HP", "shield": "SHIELD", "double": "2X DAMAGE"}
+POWERUP_COLORS = {
+    "heal": (70, 70, 225),
+    "double": (40, 190, 250),
+    "rocket": (30, 120, 240),
+    "grenade": (60, 150, 70),
+}
+POWERUP_LABELS = {"heal": "FULL HP", "double": "2X DAMAGE", "rocket": "ROCKET LAUNCHER", "grenade": "GRENADE"}
 
 
 @lru_cache(maxsize=8)
 def powerup_sprite(size: int, kind: str) -> np.ndarray:
-    """Round token with a white icon (cross, shield or "2X"), BGRA, drawn at 4x for smooth edges."""
+    """Round token with a white icon (cross, "2X", rocket or grenade), BGRA, drawn at 4x for smooth edges."""
     s = 4
     S = size * s
     img = np.zeros((S, S, 4), np.uint8)
@@ -191,15 +196,110 @@ def powerup_sprite(size: int, kind: str) -> np.ndarray:
         arm = int(k * 0.36)
         cv2.rectangle(img, (int(c - k), c - arm), (int(c + k), c + arm), white, -1)
         cv2.rectangle(img, (c - arm, int(c - k)), (c + arm, int(c + k)), white, -1)
-    elif kind == "shield":
-        pts = np.array([[c - k, c - k * 0.9], [c + k, c - k * 0.9], [c + k, c], [c, c + k * 1.1], [c - k, c]])
-        cv2.fillPoly(img, [pts.astype(np.int32)], white, cv2.LINE_AA)
+    elif kind == "rocket":
+        _draw_token_rocket(img, c, k * 2.1)
+    elif kind == "grenade":
+        cv2.ellipse(
+            img, (c, int(c + k * 0.2)), (int(k * 0.72), int(k * 0.9)), 0, 0, 360, white, -1, cv2.LINE_AA
+        )
+        cv2.rectangle(
+            img, (int(c - k * 0.3), int(c - k * 0.95)), (int(c + k * 0.3), int(c - k * 0.6)), white, -1
+        )
+        cv2.circle(
+            img, (int(c + k * 0.55), int(c - k * 0.95)), int(k * 0.25), white, max(2, s * 2), cv2.LINE_AA
+        )
     else:
         scale = r / 55.0
         (tw, th), _ = cv2.getTextSize("2X", cv2.FONT_HERSHEY_DUPLEX, scale, int(4 * s))
         cv2.putText(img, "2X", (c - tw // 2, c + th // 2), cv2.FONT_HERSHEY_DUPLEX, scale, white, int(4 * s),
                     cv2.LINE_AA)  # fmt: skip
     return cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
+
+
+def _draw_token_rocket(img: np.ndarray, c: int, size: float) -> None:
+    """White rocket silhouette flying up-right, with a yellow flame."""
+    u = np.array([0.7071, -0.7071])  # along the rocket (up-right on screen)
+    v = np.array([0.7071, 0.7071])  # across it
+
+    def poly(points):
+        pts = [c + size * (a * u + b * v) for a, b in points]
+        return np.array(pts, np.float32).round().astype(np.int32)
+
+    cv2.fillPoly(img, [poly([(-0.42, -0.08), (-0.7, 0.0), (-0.42, 0.08)])], (60, 220, 255, 255), cv2.LINE_AA)
+    white = (255, 255, 255, 255)
+    body = [(-0.42, -0.11), (0.2, -0.11), (0.48, 0.0), (0.2, 0.11), (-0.42, 0.11)]
+    cv2.fillPoly(img, [poly(body)], white, cv2.LINE_AA)
+    for side in (-1, 1):
+        fin = [(-0.42, 0.11 * side), (-0.2, 0.11 * side), (-0.46, 0.3 * side)]
+        cv2.fillPoly(img, [poly(fin)], white, cv2.LINE_AA)
+
+
+@lru_cache(maxsize=4)
+def grenade_sprite(height: int) -> np.ndarray:
+    """Olive "pineapple" grenade with segment grooves, lever and pin ring, on a square canvas
+    (for spinning). BGRA, drawn at 4x and downsampled."""
+    s = 4
+    S = height * s
+    img = np.zeros((S, S, 4), np.uint8)
+    c = S // 2
+    rx, ry = int(S * 0.28), int(S * 0.34)
+    cy = c + int(S * 0.06)
+    olive, dark, light = (50, 95, 70), (25, 50, 35), (120, 175, 140)
+    cv2.ellipse(img, (c, cy), (rx, ry), 0, 0, 360, olive + (255,), -1, cv2.LINE_AA)
+    for k in (-2, -1, 0, 1, 2):  # grooves
+        y = cy + k * ry // 3
+        half = int(rx * np.sqrt(max(0.0, 1 - (k / 3) ** 2)))
+        cv2.line(img, (c - half, y), (c + half, y), dark + (255,), s)
+    for k in (-1, 0, 1):
+        cv2.ellipse(img, (c + k * rx // 2, cy), (max(1, rx // 6), ry), 0, 0, 360, dark + (255,), s)
+    cv2.ellipse(
+        img, (c - rx // 3, cy - ry // 3), (rx // 4, ry // 5), -30, 0, 360, light + (170,), -1, cv2.LINE_AA
+    )
+    # Fuse head, lever and pin ring.
+    top = cy - ry
+    cv2.rectangle(img, (c - rx // 3, top - int(S * 0.08)), (c + rx // 3, top + s), (90, 90, 95, 255), -1)
+    lever = [(c + rx // 3, top - int(S * 0.08)), (c + rx // 2, top - int(S * 0.1)),
+             (c + int(rx * 0.9), cy - ry // 4), (c + int(rx * 0.75), cy - ry // 4)]  # fmt: skip
+    lever = np.array(lever, np.int32)
+    cv2.fillPoly(img, [lever], (120, 120, 125, 255), cv2.LINE_AA)
+    cv2.circle(
+        img, (c - rx // 2, top - int(S * 0.06)), int(S * 0.06), (170, 200, 215, 255), 2 * s, cv2.LINE_AA
+    )
+    alpha = img[:, :, 3].copy()
+    edge = cv2.morphologyEx(alpha, cv2.MORPH_GRADIENT, np.ones((2 * s, 2 * s), np.uint8))
+    img[edge > 0, :3] = (15, 30, 20)
+    return cv2.resize(img, (height, height), interpolation=cv2.INTER_AREA)
+
+
+@lru_cache(maxsize=4)
+def rocket_sprite(length: int) -> np.ndarray:
+    """Olive rocket with a red nose and fins, pointing right, on a square canvas so it can be
+    rotated to any heading without clipping. BGRA, drawn at 4x and downsampled."""
+    s = 4
+    L = length * s
+    img = np.zeros((L, L, 4), np.uint8)
+    cy = L // 2
+    bh = int(L * 0.075)  # half the body height
+    body, body_dark, red, red_dark = (75, 115, 95), (45, 70, 55), (45, 45, 205), (30, 30, 140)
+    x_tail, x_nose, x_tip = int(L * 0.12), int(L * 0.72), int(L * 0.9)
+    # Fins behind the body, nozzle, body, nose cone.
+    for side in (-1, 1):
+        fin = np.array([[x_tail, cy + side * bh], [x_tail + int(L * 0.2), cy + side * bh],
+                        [x_tail - int(L * 0.02), cy + side * int(L * 0.19)]], np.int32)  # fmt: skip
+        cv2.fillPoly(img, [fin], red + (255,), cv2.LINE_AA)
+    cv2.rectangle(img, (x_tail - int(L * 0.05), cy - int(bh * 0.7)), (x_tail, cy + int(bh * 0.7)),
+                  (60, 60, 60, 255), -1)  # fmt: skip
+    cv2.rectangle(img, (x_tail, cy - bh), (x_nose, cy + bh), body + (255,), -1)
+    nose = np.array([[x_nose, cy - bh], [x_tip, cy], [x_nose, cy + bh]], np.int32)
+    cv2.fillPoly(img, [nose], red + (255,), cv2.LINE_AA)
+    # Band, shading underneath, highlight on top, then a dark outline.
+    cv2.rectangle(img, (int(L * 0.58), cy - bh), (int(L * 0.62), cy + bh), (200, 225, 235, 255), -1)
+    cv2.rectangle(img, (x_tail, cy + bh // 3), (x_nose, cy + bh), body_dark + (255,), -1)
+    cv2.line(img, (x_tail + 2 * s, cy - bh // 2), (x_nose - 2 * s, cy - bh // 2), (170, 210, 190, 255), 2 * s)
+    alpha = img[:, :, 3].copy()
+    edge = cv2.morphologyEx(alpha, cv2.MORPH_GRADIENT, np.ones((2 * s, 2 * s), np.uint8))
+    img[edge > 0, :3] = red_dark
+    return cv2.resize(img, (length, length), interpolation=cv2.INTER_AREA)
 
 
 def rotated(sprite: np.ndarray, angle_deg: float) -> np.ndarray:
