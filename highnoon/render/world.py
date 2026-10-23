@@ -9,7 +9,7 @@ from highnoon.game.game import Game
 from highnoon.render import assets
 from highnoon.render.assets import HUD_FONT, TITLE_FONT, TextCache, blit_center
 from highnoon.render.fx import FX
-from highnoon.render.palette import BLACK, CREAM, ORANGE, RED, SAFE_GREEN, WHITE, point
+from highnoon.render.palette import BLACK, CREAM, RED, SAFE_GREEN, WHITE, point
 
 MUZZLE_FLASH_S = 0.09
 EXPLOSION_S = 0.55
@@ -91,11 +91,11 @@ class WorldView:
         glow[:] = 0
         for player_id, aim in game.aims.items():
             if aim.path is not None:
-                draw_arc_preview(glow, aim, t, scale)
+                draw_arc_preview(glow, aim, self.colors.get(player_id, WHITE), t, scale)
             else:
                 draw_laser(glow, aim, self.colors.get(player_id, WHITE), t, scale)
         for bullet in game.bullets:
-            draw_tracer(glow, bullet, t, scale)
+            draw_tracer(glow, bullet, self.colors.get(bullet.shooter, WHITE), t, scale)
         for rocket in game.rockets:
             draw_rocket_flame(glow, rocket, t, scale)
         for blast in blasts:
@@ -144,7 +144,7 @@ class WorldView:
             blit_center(image, label, center[0], center[1] - radius - 30 * scale)
 
     def _draw_reticle(self, image, aim, player_color, t: float, scale: float) -> None:
-        color = RED if aim.on_target else player_color
+        color = player_color
         center = point(aim.end)
         pulse = 1 + 0.08 * math.sin(t * 12) if aim.on_target else 1.0
         radius = int((20 if aim.on_target else 14) * scale * pulse)
@@ -173,29 +173,32 @@ def draw_crosshair(
         cv2.line(image, start, end, color, thickness, cv2.LINE_AA)
 
 
-def draw_laser(glow, aim, player_color, t: float, scale: float) -> None:
-    color = RED if aim.on_target else player_color
-    pulse = 0.85 + 0.15 * math.sin(t * 9)
+def draw_laser(glow, aim, color, t: float, scale: float) -> None:
+    locked = aim.on_target
+    pulse = 0.85 + 0.15 * math.sin(t * (18 if locked else 9))
+    halo_width = max(2, int((11 if locked else 7) * scale))
     start, end = point(aim.origin), point(aim.end)
-    cv2.line(glow, start, end, scaled_color(color, 0.30 * pulse), max(2, int(7 * scale)), cv2.LINE_AA)
-    cv2.line(glow, start, end, scaled_color(color, 0.85), max(1, int(2 * scale)), cv2.LINE_AA)
+    cv2.line(glow, start, end, scaled_color(color, (0.5 if locked else 0.3) * pulse), halo_width, cv2.LINE_AA)
+    cv2.line(
+        glow, start, end, scaled_color(color, 1.0 if locked else 0.85), max(1, int(2 * scale)), cv2.LINE_AA
+    )
 
 
-def draw_arc_preview(glow, aim, t: float, scale: float) -> None:
-    color = RED if aim.on_target else ORANGE
-    halo, core = scaled_color(color, 0.35), scaled_color(color, 0.9)
+def draw_arc_preview(glow, aim, color, t: float, scale: float) -> None:
+    brightness = 1.0 if aim.on_target else 0.9
+    halo, core = scaled_color(color, 0.4 * brightness), scaled_color(color, brightness)
     phase = int(t * 12) % 2
     for dot in aim.path[1 + phase : -1 : 2].astype(np.int32).tolist():
         cv2.circle(glow, dot, max(3, int(6 * scale)), halo, -1, cv2.LINE_AA)
         cv2.circle(glow, dot, max(2, int(3 * scale)), core, -1, cv2.LINE_AA)
 
 
-def draw_tracer(glow, bullet, t: float, scale: float) -> None:
+def draw_tracer(glow, bullet, color, t: float, scale: float) -> None:
     progress = bullet.progress(t)
     head = point(bullet.origin + bullet.direction * bullet.length * progress)
     tail = point(bullet.origin + bullet.direction * bullet.length * max(0.0, progress - 0.35))
-    cv2.line(glow, tail, head, (30, 110, 160), max(3, int(12 * scale)), cv2.LINE_AA)
-    cv2.line(glow, tail, head, (90, 210, 255), max(2, int(4 * scale)), cv2.LINE_AA)
+    cv2.line(glow, tail, head, scaled_color(color, 0.45), max(3, int(12 * scale)), cv2.LINE_AA)
+    cv2.line(glow, tail, head, scaled_color(color, 1.0), max(2, int(4 * scale)), cv2.LINE_AA)
     cv2.line(glow, tail, head, (255, 255, 255), 1, cv2.LINE_AA)
 
 

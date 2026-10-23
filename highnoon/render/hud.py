@@ -180,16 +180,20 @@ class Hud:
         if badges:
             badge = self.text.get("  ".join(badges), int(22 * scale), CREAM, HUD_FONT, stroke=2)
             blit_center(image, badge, cx, bar_y + bar_h + 16 * scale)
-        below_tag = bar_y + bar_h + 52 * scale
-        state = game.states[player.id]
+
+    def _draw_status(
+        self, image, game: Game, player_id: int, cx: float, card_top: int, t: float, scale: float
+    ):
+        state = game.states[player_id]
+        reload_y = card_top - 34 * scale
         if state.frame.ducked and state.ammo < game.cfg.max_ammo and game.mode == "duel":
-            self._draw_reload_bar(image, cx, below_tag, state.frame.reload_progress, scale)
-        elif needs_reload(game, player.id):
-            self._draw_reload_warning(image, cx, below_tag, t, scale)
+            self._draw_reload_bar(image, cx, reload_y, state.frame.reload_progress, scale)
+        elif needs_reload(game, player_id):
+            self._draw_reload_warning(image, cx, reload_y, t, scale)
         ducked_for = state.frame.ducked_for if state.frame.ducked else 0.0
         if game.mode == "duel" and ducked_for >= game.cfg.camp_warning_s:
             warning = CAMPER_WARNING if ducked_for >= game.cfg.camp_grace_s else GET_UP_WARNING
-            self._draw_camping_warning(image, warning, cx, below_tag + 44 * scale, t, scale)
+            self._draw_camping_warning(image, warning, cx, reload_y - 52 * scale, t, scale)
 
     def _camping_sprite(self, warning: str, scale: float):
         return self.text.get(warning, int(RELOAD_WARNING_SIZE * scale), RED, TITLE_FONT, stroke=3, shadow=3)
@@ -249,6 +253,7 @@ class Hud:
 
         self._draw_hp_bar(image, game, player.id, x0, y0, card_w, scale)
         self._draw_ammo_row(image, game, player.id, x0, y0, card_w, t, scale)
+        self._draw_status(image, game, player.id, x0 + card_w / 2, y0, t, scale)
 
     def _draw_hp_bar(
         self, image, game: Game, player_id: int, x0: int, y0: int, card_w: int, scale: float
