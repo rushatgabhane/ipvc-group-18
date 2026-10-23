@@ -95,6 +95,8 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 
 - **The game needs two players in view.** With fewer, it waits. When both are in view it counts
   down 3-2-1, and every new round starts with the same countdown. Nobody can shoot during it.
+  If a player leaves, they have 5 s to come back; after that the game pauses (HP and ammo are
+  kept) and resumes with a countdown when both are back. A game only ends on a KO.
 - **Duel.** A body hit costs 10 HP and a headshot 25 (4 headshots or 10 body hits to win). First to 0 loses the round.
   Bullets take 0.45 s to arrive, so you can duck when you see your opponent fire.
 - **Powerups (duel only).** Every 15 s a powerup drops from the top of the screen down the
@@ -143,12 +145,14 @@ through `tools/analyze_clip.py` after changing thresholds:
 The signals CSV has one row per player per frame: hand tracked, hand openness, fist/open, aim,
 ducked, ammo, HP, and events such as `SHOT`, `DRY_FIRE` or `FIST IGNORED (cooldown)`.
 
-**Evaluation numbers are saved after every game.** Each finished round (KO, a player leaving, or
-quitting mid-round) appends one row to `results/games.csv` (change with `--games-csv`, disable with
+**Evaluation numbers are saved after every game.** Each game (ends on a KO or when you quit; a player
+leaving only pauses it) appends one row to `results/games.csv` (change with `--games-csv`, disable with
 `--no-games-csv`). A row has the result, duration, FPS, mean/p95 latency, inference, hand-model time,
 hand lag and render time, and per player: shots, bullet hits, headshots, accuracy, rockets, grenades,
 damage dealt, powerups, reloads, dry fires, ducks, time ducked and aiming, % of aiming time the hand
-was tracked, fists detected, % of fists that fired, and why the other fists were ignored.
+was tracked, fists detected, fists blocked by the 0.6 s cooldown (`cooldown`, not counted as
+misses), % of the remaining fists that fired (empty-gun clicks count as fired), and why the others
+were ignored.
 
 `--metrics-csv` writes one row per frame with every stage's time, FPS and capture-to-screen
 latency, ready for the plots in the report. `docs/PERFORMANCE.md` records all measurements so

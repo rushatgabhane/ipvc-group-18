@@ -9,7 +9,8 @@ from pathlib import Path
 import numpy as np
 
 PLAYER_IDS = (1, 2)
-IGNORED_REASONS = ("not aiming", "ducked", "aim settling", "cooldown", "no ammo")
+IGNORED_REASONS = ("not aiming", "ducked", "aim settling")
+STAT_REASONS = {"cooldown": "cooldown"}
 PLAYER_COLUMNS = [
     "shots",
     "bullet_hits",
@@ -28,6 +29,7 @@ PLAYER_COLUMNS = [
     "aim_s",
     "hand_tracked_pct",
     "fists",
+    "cooldown",
     "fists_fired_pct",
     *[f"ignored_{reason.replace(' ', '_')}" for reason in IGNORED_REASONS],
 ]
@@ -68,7 +70,6 @@ class MatchLog:
         self._had_winner = False
 
     def update(self, game, players, t: float, timings: dict[str, float]) -> None:
-        live = game.mode == "duel"
         if game.round_live and self._start_t is None:
             self._begin(t)
         if self._start_t is not None:
@@ -81,8 +82,6 @@ class MatchLog:
                     self._timings.setdefault(name, []).append(timings[name])
             if game.winner is not None and not self._had_winner:
                 self._finish(t, "ko", game.winner)
-            elif not live:
-                self._finish(t, "abandoned", None)
         self._had_winner = game.winner is not None
         self._last_t = t
 
@@ -116,7 +115,8 @@ class MatchLog:
             counts["fists"] += 1
         tally.was_closed = frame.hand_closed
         if frame.ignored_fist is not None:
-            counts[f"ignored_{frame.ignored_fist.replace(' ', '_')}"] += 1
+            reason = frame.ignored_fist
+            counts[STAT_REASONS.get(reason, f"ignored_{reason.replace(' ', '_')}")] += 1
 
     def _finish(self, t: float, result: str, winner: int | None) -> None:
         self.rounds += 1
@@ -170,6 +170,7 @@ def count_effect(tallies: dict[int, PlayerTally], effect) -> None:
 def player_stats(tally: PlayerTally) -> dict:
     counts = tally.counts
     fired = counts["shots"] + counts["rockets"] + counts["grenades"] + counts["dry_fires"]
+    counted = counts["fists"] - counts["cooldown"]
     stats = {column: counts[column] for column in PLAYER_COLUMNS if column in counts}
     stats.update(
         {
@@ -177,9 +178,7 @@ def player_stats(tally: PlayerTally) -> dict:
             "ducked_s": f"{tally.ducked_s:.1f}",
             "aim_s": f"{tally.aim_s:.1f}",
             "hand_tracked_pct": f"{100 * tally.tracked_aim_s / tally.aim_s:.0f}" if tally.aim_s else "",
-            "fists_fired_pct": f"{100 * min(fired, counts['fists']) / counts['fists']:.0f}"
-            if counts["fists"]
-            else "",
+            "fists_fired_pct": f"{100 * min(fired, counted) / counted:.0f}" if counted else "",
         }
     )
     return {column: stats.get(column, 0) for column in PLAYER_COLUMNS}

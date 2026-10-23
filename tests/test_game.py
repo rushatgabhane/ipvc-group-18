@@ -263,3 +263,13 @@ def test_player_leaving_gets_five_seconds_to_return():
     assert game.mode == "duel" and 0 < game.return_time_left(t) <= 2.1
     t = step(game, duel, 2, t)
     assert game.mode == "duel" and game.states[2].hp == 60 and game.return_time_left(t) == 0
+
+
+def test_player_leaving_pauses_the_game_and_it_resumes_with_hp_kept():
+    game, t = start_duel()
+    game.states[2].hp = 60
+    t = step(game, alone, int((game.cfg.player_grace_s + 1) / DT), t)
+    assert game.mode == "idle" and game.round_paused
+    t = step(game, duel, int((game.cfg.countdown_s + 0.2) / DT), t)
+    assert game.mode == "duel" and not game.round_paused
+    assert game.states[2].hp == 60 and game.scores == {}

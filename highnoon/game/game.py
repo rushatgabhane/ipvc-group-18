@@ -51,6 +51,7 @@ class Game:
         self._next_powerup_t: float | None = None
         self.countdown_end_t: float | None = None
         self._players_missing_since: float | None = None
+        self.round_paused = False
         self._rng = np.random.default_rng(seed)
         self._players: dict[int, Player] = {}
         self._hitboxes: dict[int, Hitbox] = {}
@@ -113,10 +114,23 @@ class Game:
         elif self.mode == "countdown" and players_gone:
             self.mode = "idle"
         elif self.mode == "countdown" and t >= self.countdown_end_t:
-            self.reset_round()
+            if not self.round_paused:
+                self.reset_round()
+            self.round_paused = False
             self.mode = "duel"
         elif self.mode == "duel" and players_gone:
             self.mode = "idle"
+            self._pause_round()
+
+    def _pause_round(self) -> None:
+        if self.winner is not None:
+            return
+        self.bullets.clear()
+        self.rockets.clear()
+        self.grenades.clear()
+        self.powerup = None
+        self._next_powerup_t = None
+        self.round_paused = True
 
     def blast_radius(self, grenade: bool = False) -> float:
         return self.cfg.rocket_blast_radius * self.height * (GRENADE_BLAST_SCALE if grenade else 1.0)
@@ -132,6 +146,7 @@ class Game:
         self._next_powerup_t = None
         self.winner = None
         self.round_over_t = None
+        self.round_paused = False
 
     def _create_states(self, players: list[Player], reassigned: set[int]) -> None:
         for player in players:
