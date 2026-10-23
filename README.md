@@ -92,8 +92,8 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 | **Duck** | Get your head below the top of the wall (the bottom 25% of the screen). You are safe there but cannot shoot |
 | **Reload** | Duck. Every duck refills the magazine (3 bullets) |
 
-- **One player in view: practice mode.** Shoot the bottles.
-- **Two players: duel.** A body hit costs 15 HP and a headshot 35. First to 0 loses the round.
+- **The game needs two players in view.** With fewer, it waits.
+- **Duel.** A body hit costs 15 HP and a headshot 35. First to 0 loses the round.
   Bullets take 0.25 s to arrive, so you can duck when you see your opponent flick.
 - **Powerups (duel only).** Every 30 s a powerup is tossed up from below the screen, flies in an
   arc and falls back out. Whoever shoots it first gets it (lead your shot: it moves):
@@ -177,13 +177,13 @@ highnoon/
     identity.py        persistent player ids, face-to-player assignment (T3)
   render/
     renderer.py        background compositing, overlays, debug panel (T5)
-    game_view.py       laser sights, tracers, bottles, name tags, HUD cards, announcements (T4/T5)
+    game_view.py       laser sights, tracers, powerups, name tags, HUD cards, announcements (T4/T5)
     assets.py          procedural backdrop/wall/sprites, cached TrueType text
     fx.py              particles, floating numbers, screen shake
     display.py         pyglet (OpenGL) / OpenCV window output
   game/
     actions.py         fire / duck / reload state machines (T4)
-    game.py            rules: shots, hits, HP, rounds, practice targets (T4)
+    game.py            rules: shots, hits, HP, rounds, powerups (T4)
     geometry.py        2D ray casting against hitboxes and cover
 tools/
   download_models.py   fetch + verify model weights

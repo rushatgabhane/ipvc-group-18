@@ -136,10 +136,6 @@ class FX:
                     spread=np.pi * 0.9, direction=-np.pi / 2)  # fmt: skip
             p.burst(pos, 8, (150, 230, 255), speed=(80, 200), life=(0.05, 0.15), size=(2, 3), gravity=False)
             self.texts.append(FloatText("BLOCKED", pos.copy(), t, (180, 220, 255), 32, 0.7))
-        elif e.kind == "shatter":
-            p.burst(pos, 30, (90, 180, 80), speed=(150, 450), life=(0.4, 0.9), size=(2, 5))
-            p.burst(pos, 10, (230, 250, 230), speed=(100, 300), life=(0.2, 0.5), size=(1, 3))
-            self.texts.append(FloatText("+1", pos.copy(), t, (120, 240, 140), 52))
         elif e.kind == "shielded":
             p.burst(pos, 26, (240, 190, 90), speed=(150, 400), life=(0.2, 0.5), size=(2, 4), gravity=False)
             self.texts.append(FloatText("SHIELDED", pos.copy(), t, (255, 210, 130), 40))

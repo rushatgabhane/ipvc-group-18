@@ -96,20 +96,6 @@ def test_wall_is_static_and_blocks_low_shots():
     assert (origin + direction * dist)[1] == pytest.approx(540.0)
 
 
-def test_practice_mode_with_one_player():
-    game = Game(GameConfig(), (1280, 720))
-    game.update([make_player(1, 300), Player(id=2)], 0.0, set())
-    assert game.mode == "practice"
-    assert len(game.targets) == game.cfg.practice_targets
-    radius = 0.04 * 720
-    keep_out = radius + 0.4 * 200  # around the nose (x=300) when no face is tracked
-    for target in game.targets:
-        assert not (300 - keep_out < target.center[0] < 300 + keep_out)
-        assert target.center[1] < 540 - radius  # above the wall
-    centers = [t.center for t in game.targets]
-    assert min(np.linalg.norm(a - b) for i, a in enumerate(centers) for b in centers[i + 1 :]) > 0
-
-
 def test_ducking_reloads():
     game = Game(GameConfig(), (1280, 720))
     assert game.cfg.max_ammo == 3
@@ -134,6 +120,12 @@ def test_powerup_spawns_every_interval_in_duel_and_flies_an_arc():
     assert 0.2 * 720 < peak[1] < 0.75 * 720  # peaks above the wall
     t = step(game, duel, int(2 * cfg.powerup_rise_s / DT) + 2, t)
     assert game.powerup is None  # fell back out without being shot
+
+
+def test_one_player_is_not_a_game():
+    game = Game(GameConfig(), (1280, 720))
+    game.update([make_player(1, 300), Player(id=2)], 0.0, set())
+    assert game.mode == "idle"
 
 
 def test_powerups_only_in_duel():

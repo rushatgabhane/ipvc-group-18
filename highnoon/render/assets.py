@@ -149,37 +149,6 @@ def _soft_circle(size: int, color, falloff: float = 2.0) -> np.ndarray:
     return out
 
 
-@lru_cache(maxsize=8)
-def bottle_sprite(height: int) -> np.ndarray:
-    """A green glass bottle with highlight, BGRA, drawn at 4x and downsampled for smooth edges."""
-    s = 4
-    H, W = height * s, int(height * 0.42) * s
-    img = np.zeros((H, W, 4), np.uint8)
-    body_top, neck_w = int(H * 0.38), int(W * 0.34)
-    cx = W // 2
-    glass, dark, light = (55, 125, 45), (30, 70, 25), (170, 235, 170)
-    # Neck, shoulder and body.
-    cv2.rectangle(img, (cx - neck_w // 2, int(H * 0.06)), (cx + neck_w // 2, body_top), glass + (235,), -1)
-    cv2.ellipse(img, (cx, body_top), (W // 2 - s, int(H * 0.1)), 0, 180, 360, glass + (235,), -1)
-    cv2.rectangle(img, (s, body_top), (W - s, H - 3 * s), glass + (235,), -1)
-    cv2.ellipse(img, (cx, H - 3 * s), (W // 2 - s, 3 * s), 0, 0, 180, glass + (235,), -1)
-    # Cap, label, highlight, outline.
-    cv2.rectangle(
-        img, (cx - neck_w // 2 - s, 0), (cx + neck_w // 2 + s, int(H * 0.08)), (40, 40, 160, 255), -1
-    )
-    cv2.rectangle(img, (s, int(H * 0.55)), (W - s, int(H * 0.78)), (170, 215, 235, 255), -1)
-    cv2.line(img, (2 * s, int(H * 0.66)), (W - 2 * s, int(H * 0.66)), (60, 90, 160, 255), 2 * s)
-    cv2.line(img, (int(W * 0.25), body_top + 4 * s), (int(W * 0.25), int(H * 0.52)), light + (200,), 3 * s)
-    cv2.line(
-        img, (cx - neck_w // 4, int(H * 0.1)), (cx - neck_w // 4, body_top - 2 * s), light + (160,), 2 * s
-    )
-    alpha = img[:, :, 3].copy()
-    edge = cv2.morphologyEx(alpha, cv2.MORPH_GRADIENT, np.ones((3 * s, 3 * s), np.uint8))
-    img[edge > 0, :3] = dark
-    small = cv2.resize(img, (W // s, H // s), interpolation=cv2.INTER_AREA)
-    return small
-
-
 @lru_cache(maxsize=4)
 def glow_sprite(size: int, color: tuple[int, int, int]) -> np.ndarray:
     return _soft_circle(size, color, falloff=1.6)

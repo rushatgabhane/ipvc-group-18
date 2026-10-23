@@ -3,7 +3,7 @@
 Layer order, back to front:
   1. players (already composited onto the backdrop by the renderer)
   2. the wall, which occludes the lower body, so a ducking player disappears behind it
-  3. bottles, the flying powerup, particles
+  3. the flying powerup, particles
   4. additive glow layer: laser sights, tracers, muzzle flashes
   5. reticles, name tags above heads, floating numbers
   6. HUD cards, banner, announcements
@@ -67,7 +67,6 @@ class GameView:
         self.fx.update(t, game.effects, self.colors)
         visible = [p for p in players if p.visible and game.states.get(p.id) is not None]
 
-        self._draw_bottles(image, game, t, s)
         self._draw_powerup(image, game, t, s)
         self._draw_particles(image)
         self._draw_glow(image, game, t, s)
@@ -86,19 +85,6 @@ class GameView:
         return self.fx.shake_offset(t)
 
     # ------------------------------------------------------------------ world elements
-    def _draw_bottles(self, image, game: Game, t: float, s: float) -> None:
-        for i, target in enumerate(game.targets):
-            if not target.alive:
-                continue
-            age = t - target.spawned_t
-            pop = min(1.0, 0.4 + age / 0.18) if age < 0.18 else 1.0 + 0.08 * math.exp(-(age - 0.18) * 12)
-            sprite = assets.scaled(assets.bottle_sprite(int(target.radius * 2.6)), pop)
-            bob = math.sin(t * 2.2 + i * 1.7) * 3 * s
-            # Soft glow behind the bottle so it reads against the sky.
-            blit_center(image, assets.glow_sprite(int(target.radius * 3.2), (200, 240, 255)),
-                        target.center[0], target.center[1] + bob, alpha=0.35)  # fmt: skip
-            blit_center(image, sprite, target.center[0], target.center[1] + bob)
-
     def _draw_powerup(self, image, game: Game, t: float, s: float) -> None:
         pu = game.powerup
         if pu is None:
@@ -247,8 +233,7 @@ class GameView:
 
             name = self.text.get(f"PLAYER {p.id}", int(30 * s), color, HUD_FONT)
             blit(image, name, x0 + int(22 * s), y0 + int(6 * s))
-            label = "BOTTLES" if game.mode == "practice" else "WINS"
-            score = self.text.get(f"{game.scores.get(p.id, 0)} {label}", int(24 * s), CREAM, HUD_FONT)
+            score = self.text.get(f"{game.scores.get(p.id, 0)} WINS", int(24 * s), CREAM, HUD_FONT)
             blit(image, score, x0 + cw - score.shape[1] - int(12 * s), y0 + int(10 * s))
 
             bx0, by0 = x0 + int(12 * s), y0 + int(44 * s)
@@ -294,8 +279,7 @@ class GameView:
         w = image.shape[1]
         trigger = "CLOSE YOUR HAND TO SHOOT" if game.cfg.trigger == "fist" else "FLICK UP TO SHOOT"
         title, hint = {
-            "idle": ("HIGH NOON", "STEP INTO VIEW"),
-            "practice": ("PRACTICE", f"POINT YOUR ARM  |  {trigger}  |  DUCK TO RELOAD"),
+            "idle": ("HIGH NOON", "TWO PLAYERS: STEP INTO VIEW"),
             "duel": ("DUEL", f"{trigger}  |  DUCK TO RELOAD  |  SHOOT POWERUPS  |  FIRST TO ZERO LOSES"),
         }[game.mode]
         title_s = self.text.get(title, int(30 * s), GOLD, TITLE_FONT, stroke=2, stroke_color=(20, 30, 50))
@@ -326,8 +310,6 @@ class GameView:
         if game.mode != self._mode:
             if game.mode == "duel":
                 self.fx.announce("DRAW!", t, GOLD)
-            elif game.mode == "practice" and self._mode == "duel":
-                self.fx.announce("PRACTICE", t, CREAM, size=72)
             self._mode = game.mode
         if self._winner is not None and game.winner is None:
             self._round += 1

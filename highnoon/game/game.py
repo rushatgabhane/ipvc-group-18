@@ -1,8 +1,7 @@
 """T4: game rules. Turns recognised actions into game state: shots, hits, HP, rounds.
 
 Modes (chosen from how many players T3 currently sees):
-  idle      nobody in frame
-  practice  one player: shoot bottles that spawn on the other side of the screen
+  idle      fewer than two players in frame: waiting for a duel
   duel      two players: shoot each other; first to 0 HP loses the round
 
 A shot is resolved when its bullet arrives, `bullet_travel_s` after firing, against the
@@ -65,15 +64,6 @@ class Bullet:
 
 
 @dataclass
-class Target:
-    center: np.ndarray
-    radius: float
-    alive: bool = True
-    respawn_t: float = 0.0
-    spawned_t: float = 0.0  # for the pop-in animation
-
-
-@dataclass
 class Powerup:
     kind: str  # one of POWERUP_KINDS
     origin: np.ndarray  # position at t_spawn
@@ -90,7 +80,7 @@ class Powerup:
 
 @dataclass
 class Effect:
-    kind: str  # "hit", "headshot", "blocked", "shatter", "muzzle", "shielded", "pickup"
+    kind: str  # "hit", "headshot", "blocked", "muzzle", "shielded", "pickup"
     pos: np.ndarray
     t: float
     player: int  # shooter
@@ -114,7 +104,6 @@ class Game:
         self.states: dict[int, PlayerState] = {}
         self.bullets: list[Bullet] = []
         self.effects: list[Effect] = []
-        self.targets: list[Target] = []
         self.powerup: Powerup | None = None
         self._next_powerup_t: float | None = None
         self._t = 0.0
@@ -134,12 +123,7 @@ class Game:
             if p.id in reassigned or (p.visible and p.id not in self.states):
                 self.states[p.id] = self._new_state()
 
-        visible = [p for p in players if p.visible]
-        self.mode = {0: "idle", 1: "practice"}.get(len(visible), "duel")
-        if self.mode == "practice":
-            self._update_targets(visible[0], t)
-        else:
-            self.targets.clear()
+        self.mode = "duel" if sum(p.visible for p in players) >= 2 else "idle"
 
         if self.round_over_t is not None and t - self.round_over_t >= self.cfg.round_end_s:
             self.reset_round()
@@ -205,11 +189,6 @@ class Game:
                 self.effects.append(Effect("blocked", pos, t, b.shooter))
             elif kind == "powerup":
                 self._collect(b.shooter, target, pos, t)
-            elif kind == "bottle":
-                target.alive = False
-                target.respawn_t = t + 1.2
-                self.scores[b.shooter] = self.scores.get(b.shooter, 0) + 1
-                self.effects.append(Effect("shatter", pos, t, b.shooter))
         self.bullets = remaining
 
     def _damage(self, shooter: int, target_id: int, kind: str, pos: np.ndarray, t: float) -> None:
@@ -255,9 +234,6 @@ class Game:
             else:
                 consider(ray_circle(origin, direction, *head), ("head", pid))
                 consider(ray_polygon(origin, direction, torso), ("body", pid))
-        for target in self.targets:
-            if target.alive:
-                consider(ray_circle(origin, direction, target.center, target.radius), ("bottle", target))
         if self.powerup is not None:
             pu = self.powerup
             consider(ray_circle(origin, direction, pu.center(self._t), pu.radius), ("powerup", pu))
@@ -277,7 +253,7 @@ class Game:
         torso = center + (quad - center) * 1.15
         return head, torso
 
-    # ---------------------------------------------------------------- aims, targets
+    # ---------------------------------------------------------------- aims
     def _update_aims(self, players: list[Player]) -> None:
         self.aims = {}
         for p in players:
@@ -286,7 +262,7 @@ class Game:
                 continue
             o, d = p.signals.aim_origin, p.signals.aim_dir
             dist, (kind, _) = self._cast(p.id, o, d)
-            self.aims[p.id] = Aim(o, o + d * dist, kind in ("head", "body", "bottle", "powerup"))
+            self.aims[p.id] = Aim(o, o + d * dist, kind in ("head", "body", "powerup"))
 
     # ---------------------------------------------------------------- powerups
     def _update_powerup(self, t: float) -> None:
@@ -328,49 +304,3 @@ class Game:
         else:
             st.double_until = t + self.cfg.double_damage_s
         self.effects.append(Effect("pickup", pos, t, pid, detail=pu.kind))
-
-    def _update_targets(self, player: Player, t: float) -> None:
-        if not self.targets:
-            self.targets = [
-                Target(np.zeros(2, np.float32), 0.0, alive=False) for _ in range(self.cfg.practice_targets)
-            ]
-        for target in self.targets:
-            if not target.alive and t >= target.respawn_t:
-                self._spawn_target(target, player, t)
-
-    def _spawn_target(self, target: Target, player: Player, t: float) -> None:
-        """Place a bottle above the wall, clear of the player's head and of other bottles."""
-        radius = 0.04 * self.height
-        # Keep clear of the head. Shoulders are a poor guide: when a player sits close to the
-        # camera they are off-screen and their estimated span covers most of the frame.
-        if player.face is not None:
-            body_x0, body_x1 = float(player.face.bbox[0]), float(player.face.bbox[2])
-            margin = radius + 20
-        elif player.smoothed is not None:
-            body_x0 = body_x1 = float(player.smoothed[NOSE][0])
-            margin = radius + 0.4 * (player.signals.torso_len if player.signals else 100.0)
-        else:
-            body_x0 = body_x1 = self.width / 2
-            margin = 0.0
-        others = [t.center for t in self.targets if t.alive and t is not target]
-        top = 0.18 * self.height  # keep clear of the banner
-        bottom = (1.0 - self.cfg.cover_height) * self.height - 2 * radius  # above the wall
-        center = None
-        for attempt in range(40):  # rejection sampling
-            c = np.array(
-                [self._rng.uniform(0.06, 0.94) * self.width, self._rng.uniform(top, bottom)],
-                np.float32,
-            )
-            # After 20 failed tries (player fills the frame), allow spots in front of the player.
-            if attempt < 20 and body_x0 - margin < c[0] < body_x1 + margin:
-                continue
-            if any(np.linalg.norm(c - o) < 4 * radius for o in others):
-                continue
-            center = c
-            break
-        if center is None:
-            return  # no free spot this frame; try again next frame
-        target.center = center
-        target.radius = radius
-        target.alive = True
-        target.spawned_t = t

@@ -103,7 +103,6 @@ class GameConfig:
     # Bullets take time to arrive so the target can react (duck) after seeing the shot.
     bullet_travel_s: float = 0.25
     round_end_s: float = 4.0
-    practice_targets: int = 3
     # Powerups (duel only): one is tossed up from below the screen every `powerup_interval_s`,
     # flies in a ballistic arc (peak after `powerup_rise_s`) and falls back out. Shooting it
     # gives its effect to the shooter.
