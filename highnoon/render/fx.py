@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from highnoon.render.assets import POWERUP_COLORS, POWERUP_LABELS
+
 GRAVITY = 900.0  # px/s^2
 
 
@@ -125,8 +127,7 @@ class FX:
             head = e.kind == "headshot"
             p.burst(pos, 40 if head else 22, (50, 50, 230), speed=(150, 520), life=(0.3, 0.7), size=(2, 6))
             p.burst(pos, 12, (200, 230, 255), speed=(80, 250), life=(0.1, 0.25), size=(2, 3), gravity=False)
-            dmg = "-35" if head else "-15"
-            self.texts.append(FloatText(dmg, pos.copy(), t, (80, 80, 255), 56 if head else 44))
+            self.texts.append(FloatText(f"-{e.amount}", pos.copy(), t, (80, 80, 255), 56 if head else 44))
             self._shake_t, self._shake_amp = t, 14.0 if head else 8.0
             if head:
                 self.announce("HEADSHOT!", t, (60, 60, 240), size=84, duration=1.1)
@@ -139,3 +140,12 @@ class FX:
             p.burst(pos, 30, (90, 180, 80), speed=(150, 450), life=(0.4, 0.9), size=(2, 5))
             p.burst(pos, 10, (230, 250, 230), speed=(100, 300), life=(0.2, 0.5), size=(1, 3))
             self.texts.append(FloatText("+1", pos.copy(), t, (120, 240, 140), 52))
+        elif e.kind == "shielded":
+            p.burst(pos, 26, (240, 190, 90), speed=(150, 400), life=(0.2, 0.5), size=(2, 4), gravity=False)
+            self.texts.append(FloatText("SHIELDED", pos.copy(), t, (255, 210, 130), 40))
+        elif e.kind == "pickup":
+            color = POWERUP_COLORS[e.detail]
+            p.burst(pos, 40, color, speed=(150, 500), life=(0.3, 0.8), size=(2, 6))
+            p.burst(pos, 16, (255, 255, 255), speed=(80, 260), life=(0.1, 0.3), size=(2, 3), gravity=False)
+            self.texts.append(FloatText(POWERUP_LABELS[e.detail], pos.copy(), t, color, 48))
+            self.announce(f"P{e.player}: {POWERUP_LABELS[e.detail]}", t, color, size=72, duration=1.2)

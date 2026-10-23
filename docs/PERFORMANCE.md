@@ -105,6 +105,9 @@ throughput is unchanged (30 fps) and latency rose about 3 ms. The rules that kee
   costs under 0.1 ms; Pillow rendering every frame would cost milliseconds.
 - All glow (lasers, tracers, muzzle flashes) goes into one layer applied with a single `cv2.add`.
 - Alpha blending only touches each sprite's own region, never the full frame.
+- The flying powerup (token sprite built once, rotated with `warpAffine` on its ~60 px box, plus a
+  3-circle trail, glow and label) costs 0.56 ms median / 0.64 ms p95 per frame, and only while one
+  is on screen. Its position is a closed-form parabola, so the game logic costs nothing measurable.
 
 ### 9. Newest-frame-only capture
 The capture thread overwrites a single slot instead of filling a queue. If any stage gets slow,

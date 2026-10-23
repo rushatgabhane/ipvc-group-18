@@ -199,6 +199,47 @@ def bullet_icon(height: int, filled: bool) -> np.ndarray:
     return cv2.resize(img, (W // s, H // s), interpolation=cv2.INTER_AREA)
 
 
+POWERUP_COLORS = {"heal": (70, 70, 225), "shield": (230, 165, 60), "double": (40, 190, 250)}
+POWERUP_LABELS = {"heal": "+HP", "shield": "SHIELD", "double": "2X DAMAGE"}
+
+
+@lru_cache(maxsize=8)
+def powerup_sprite(size: int, kind: str) -> np.ndarray:
+    """Round token with a white icon (cross, shield or "2X"), BGRA, drawn at 4x for smooth edges."""
+    s = 4
+    S = size * s
+    img = np.zeros((S, S, 4), np.uint8)
+    c, r = S // 2, S // 2 - 2 * s
+    color = POWERUP_COLORS[kind]
+    dark = tuple(int(v * 0.55) for v in color)
+    cv2.circle(img, (c, c), r, dark + (255,), -1, cv2.LINE_AA)
+    cv2.circle(img, (c, c), int(r * 0.86), color + (255,), -1, cv2.LINE_AA)
+    shine = (int(r * 0.7), int(r * 0.7))
+    cv2.ellipse(img, (c, c), shine, 0, 200, 290, (255, 255, 255, 140), 3 * s, cv2.LINE_AA)
+    white = (255, 255, 255, 255)
+    k = r * 0.42
+    if kind == "heal":
+        arm = int(k * 0.36)
+        cv2.rectangle(img, (int(c - k), c - arm), (int(c + k), c + arm), white, -1)
+        cv2.rectangle(img, (c - arm, int(c - k)), (c + arm, int(c + k)), white, -1)
+    elif kind == "shield":
+        pts = np.array([[c - k, c - k * 0.9], [c + k, c - k * 0.9], [c + k, c], [c, c + k * 1.1], [c - k, c]])
+        cv2.fillPoly(img, [pts.astype(np.int32)], white, cv2.LINE_AA)
+    else:
+        scale = r / 55.0
+        (tw, th), _ = cv2.getTextSize("2X", cv2.FONT_HERSHEY_DUPLEX, scale, int(4 * s))
+        cv2.putText(img, "2X", (c - tw // 2, c + th // 2), cv2.FONT_HERSHEY_DUPLEX, scale, white, int(4 * s),
+                    cv2.LINE_AA)  # fmt: skip
+    return cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
+
+
+def rotated(sprite: np.ndarray, angle_deg: float) -> np.ndarray:
+    """Rotate a BGRA sprite about its centre (same size; for small sprites only)."""
+    h, w = sprite.shape[:2]
+    m = cv2.getRotationMatrix2D((w / 2, h / 2), angle_deg, 1.0)
+    return cv2.warpAffine(sprite, m, (w, h), flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0, 0))
+
+
 # ------------------------------------------------------------------------------------------ scenery
 def desert_background(w: int, h: int, seed: int = 7) -> np.ndarray:
     """High-noon desert: sky gradient, sun glow, two layers of mesas, cacti, textured sand. BGR."""

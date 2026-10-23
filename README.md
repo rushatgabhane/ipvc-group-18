@@ -90,11 +90,19 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 | **Aim** | Point with your arm (straight, or just the forearm when sitting close). A laser sight follows it, and the dot turns red on a target |
 | **Shoot** | Aim with an **open hand**, then **close it into a fist**. Open it again before the next shot |
 | **Duck** | Get your head below the top of the wall (the bottom 25% of the screen). You are safe there but cannot shoot |
-| **Reload** | Lower both arms and hold for 0.7 s (6 bullets per magazine) |
+| **Reload** | Duck. Every duck refills the magazine (3 bullets) |
 
 - **One player in view: practice mode.** Shoot the bottles.
 - **Two players: duel.** A body hit costs 15 HP and a headshot 35. First to 0 loses the round.
   Bullets take 0.25 s to arrive, so you can duck when you see your opponent flick.
+- **Powerups (duel only).** Every 30 s a powerup is tossed up from below the screen, flies in an
+  arc and falls back out. Whoever shoots it first gets it (lead your shot: it moves):
+
+  | Powerup | Effect |
+  |---|---|
+  | **+HP** (red cross) | +35 HP, up to 100 |
+  | **SHIELD** (blue) | Absorbs the next hit. Lasts until it is hit or the round ends |
+  | **2X DAMAGE** (gold) | Your hits do double damage for 10 s |
 
 All thresholds are in `GameConfig` (`highnoon/config.py`). Set `trigger = "flick"` to fire with an
 upward recoil flick of the arm instead of a fist (useful when standing too far away for hand tracking).
@@ -203,5 +211,4 @@ statement will be in the report appendix.
 ### IDEAS
 
 1. Arcade mode.
-2. Powerups.
-3. Tweakable Parameters
+2. ~~Powerups.~~ Done.

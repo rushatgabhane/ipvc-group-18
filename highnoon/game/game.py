@@ -7,6 +7,13 @@ Modes (chosen from how many players T3 currently sees):
 
 A shot is resolved when its bullet arrives, `bullet_travel_s` after firing, against the
 target's geometry *at arrival time*. That delay is what makes ducking a real defence.
+
+Powerups (duel only): every `powerup_interval_s` one is tossed up from below the screen and
+falls back out, like fruit in Fruit Ninja. Its path is a closed-form parabola, so its position
+at any time (including a bullet's arrival time) is exact. Whoever shoots it gets the effect:
+  heal    +heal_hp HP
+  shield  the next hit on this player is absorbed
+  double  this player's hits do double damage for double_damage_s
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ from highnoon.game.actions import ActionFrame, PlayerActions, Shot
 from highnoon.game.geometry import ray_circle, ray_exit_distance, ray_polygon, rect_polygon
 
 L_SHOULDER, R_SHOULDER, L_HIP, R_HIP, NOSE = 11, 12, 23, 24, 0
+POWERUP_KINDS = ("heal", "shield", "double")
 
 
 @dataclass
@@ -42,6 +50,8 @@ class PlayerState:
     ammo: int
     frame: ActionFrame = field(default_factory=ActionFrame)
     last_hit_t: float = -math.inf
+    shield: bool = False
+    double_until: float = -math.inf
 
 
 @dataclass
@@ -64,11 +74,28 @@ class Target:
 
 
 @dataclass
+class Powerup:
+    kind: str  # one of POWERUP_KINDS
+    origin: np.ndarray  # position at t_spawn
+    velocity: np.ndarray  # px/s at t_spawn
+    gravity: float  # px/s^2, downward
+    radius: float
+    t_spawn: float
+    t_end: float  # back below the screen
+
+    def center(self, t: float) -> np.ndarray:
+        dt = t - self.t_spawn
+        return self.origin + self.velocity * dt + np.array([0.0, 0.5 * self.gravity * dt * dt], np.float32)
+
+
+@dataclass
 class Effect:
-    kind: str  # "hit", "headshot", "blocked", "shatter", "muzzle"
+    kind: str  # "hit", "headshot", "blocked", "shatter", "muzzle", "shielded", "pickup"
     pos: np.ndarray
     t: float
     player: int  # shooter
+    amount: int = 0  # damage dealt ("hit", "headshot")
+    detail: str = ""  # powerup kind ("pickup")
 
 
 @dataclass
@@ -88,6 +115,9 @@ class Game:
         self.bullets: list[Bullet] = []
         self.effects: list[Effect] = []
         self.targets: list[Target] = []
+        self.powerup: Powerup | None = None
+        self._next_powerup_t: float | None = None
+        self._t = 0.0
         self.aims: dict[int, Aim] = {}
         self.mode = "idle"
         self.winner: int | None = None
@@ -99,6 +129,7 @@ class Game:
     # ---------------------------------------------------------------- update
     def update(self, players: list[Player], t: float, reassigned: set[int]) -> None:
         self._players = {p.id: p for p in players}
+        self._t = t
         for p in players:
             if p.id in reassigned or (p.visible and p.id not in self.states):
                 self.states[p.id] = self._new_state()
@@ -112,13 +143,14 @@ class Game:
 
         if self.round_over_t is not None and t - self.round_over_t >= self.cfg.round_end_s:
             self.reset_round()
+        self._update_powerup(t)
 
         for p in players:
             st = self.states.get(p.id)
             if st is None:  # never seen yet
                 continue
             st.frame = st.actions.update(p.signals if p.visible else None, t, self.height)
-            if st.frame.reload and st.ammo < self.cfg.max_ammo:
+            if st.frame.reload and st.ammo < self.cfg.max_ammo:  # ducking reloads
                 st.ammo = self.cfg.max_ammo
             if st.frame.shot is not None and self.round_over_t is None:
                 self._fire(p.id, st, st.frame.shot, t)
@@ -126,6 +158,10 @@ class Game:
         self._resolve_bullets(t)
         self._update_aims(players)
         self.effects = [e for e in self.effects if t - e.t < 0.8]
+
+    def double_active(self, pid: int) -> bool:
+        st = self.states.get(pid)
+        return st is not None and self._t < st.double_until
 
     @property
     def cover(self) -> Cover:
@@ -135,7 +171,10 @@ class Game:
     def reset_round(self) -> None:
         for st in self.states.values():
             st.hp, st.ammo = self.cfg.max_hp, self.cfg.max_ammo
+            st.shield, st.double_until = False, -math.inf
         self.bullets.clear()
+        self.powerup = None
+        self._next_powerup_t = None  # the timer restarts with the round
         self.winner = None
         self.round_over_t = None
 
@@ -164,6 +203,8 @@ class Game:
                 self._damage(b.shooter, target, kind, pos, t)
             elif kind == "cover":
                 self.effects.append(Effect("blocked", pos, t, b.shooter))
+            elif kind == "powerup":
+                self._collect(b.shooter, target, pos, t)
             elif kind == "bottle":
                 target.alive = False
                 target.respawn_t = t + 1.2
@@ -173,9 +214,16 @@ class Game:
 
     def _damage(self, shooter: int, target_id: int, kind: str, pos: np.ndarray, t: float) -> None:
         st = self.states[target_id]
-        st.hp = max(0, st.hp - (self.cfg.head_damage if kind == "head" else self.cfg.body_damage))
+        if st.shield:
+            st.shield = False
+            self.effects.append(Effect("shielded", pos, t, shooter))
+            return
+        amount = self.cfg.head_damage if kind == "head" else self.cfg.body_damage
+        if t < self.states[shooter].double_until:
+            amount *= 2
+        st.hp = max(0, st.hp - amount)
         st.last_hit_t = t
-        self.effects.append(Effect("headshot" if kind == "head" else "hit", pos, t, shooter))
+        self.effects.append(Effect("headshot" if kind == "head" else "hit", pos, t, shooter, amount))
         if st.hp == 0:
             self.winner = shooter
             self.round_over_t = t
@@ -210,6 +258,9 @@ class Game:
         for target in self.targets:
             if target.alive:
                 consider(ray_circle(origin, direction, target.center, target.radius), ("bottle", target))
+        if self.powerup is not None:
+            pu = self.powerup
+            consider(ray_circle(origin, direction, pu.center(self._t), pu.radius), ("powerup", pu))
         return best, hit
 
     def _hitboxes(self, p: Player) -> tuple[tuple[np.ndarray, float], np.ndarray]:
@@ -235,7 +286,48 @@ class Game:
                 continue
             o, d = p.signals.aim_origin, p.signals.aim_dir
             dist, (kind, _) = self._cast(p.id, o, d)
-            self.aims[p.id] = Aim(o, o + d * dist, kind in ("head", "body", "bottle"))
+            self.aims[p.id] = Aim(o, o + d * dist, kind in ("head", "body", "bottle", "powerup"))
+
+    # ---------------------------------------------------------------- powerups
+    def _update_powerup(self, t: float) -> None:
+        if self.powerup is not None and t >= self.powerup.t_end:
+            self.powerup = None
+        # Only duels spawn powerups. Leaving the duel for a frame (a player briefly not detected)
+        # does not reset the timer; only a new round does.
+        if self.mode != "duel" or self.round_over_t is not None:
+            return
+        if self._next_powerup_t is None:
+            self._next_powerup_t = t + self.cfg.powerup_interval_s
+        if t >= self._next_powerup_t and self.powerup is None:
+            self.powerup = self._spawn_powerup(t)
+            self._next_powerup_t = t + self.cfg.powerup_interval_s
+
+    def _spawn_powerup(self, t: float) -> Powerup:
+        """Toss a powerup up from just below the screen so it peaks above the wall and falls back.
+
+        With rise time T to a peak d px above the start: g = 2d / T^2 and v_y = -2d / T.
+        """
+        h, w, rng = self.height, self.width, self._rng
+        radius = self.cfg.powerup_radius * h
+        start = np.array([rng.uniform(0.3, 0.7) * w, h + radius], np.float32)
+        peak_y = rng.uniform(0.22, 0.4) * h
+        rise = self.cfg.powerup_rise_s
+        d = float(start[1] - peak_y)
+        land_x = rng.uniform(0.2, 0.8) * w
+        velocity = np.array([(land_x - start[0]) / (2 * rise), -2 * d / rise], np.float32)
+        kind = POWERUP_KINDS[int(rng.integers(len(POWERUP_KINDS)))]
+        return Powerup(kind, start, velocity, 2 * d / rise**2, radius, t, t + 2 * rise)
+
+    def _collect(self, pid: int, pu: Powerup, pos: np.ndarray, t: float) -> None:
+        self.powerup = None  # a second bullet in the same frame now finds nothing
+        st = self.states[pid]
+        if pu.kind == "heal":
+            st.hp = min(self.cfg.max_hp, st.hp + self.cfg.heal_hp)
+        elif pu.kind == "shield":
+            st.shield = True
+        else:
+            st.double_until = t + self.cfg.double_damage_s
+        self.effects.append(Effect("pickup", pos, t, pid, detail=pu.kind))
 
     def _update_targets(self, player: Player, t: float) -> None:
         if not self.targets:

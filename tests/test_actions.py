@@ -90,12 +90,13 @@ def test_duck_is_absolute_not_relative_to_standing_height():
     assert not any(f.ducked for f in run(PlayerActions(FLICK), [sig(0, head_y=520)] * 90))
 
 
-def test_reload_after_hold_fires_once():
+def test_reload_once_per_duck():
     acts = PlayerActions(FLICK)
-    frames = run(acts, [sig(aim=False, arms_down=True)] * 40)
-    reloads = [i for i, f in enumerate(frames) if f.reload]
-    assert len(reloads) == 1
-    assert reloads[0] * DT >= FLICK.reload_hold_s - 1e-6
+    seq = [sig(0)] * 5 + [sig(0, head_y=600)] * 20 + [sig(0)] * 5 + [sig(0, head_y=600)] * 5
+    reloads = [i for i, f in enumerate(run(acts, seq)) if f.reload]
+    assert reloads == [5, 30]  # on entering the duck, not every frame spent ducked
+    # Lowering both arms no longer reloads.
+    assert not any(f.reload for f in run(PlayerActions(FLICK), [sig(aim=False, arms_down=True)] * 40))
 
 
 def test_fist_fires_once_per_close():

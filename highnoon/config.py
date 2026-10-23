@@ -95,9 +95,8 @@ class GameConfig:
     # of screen height) above it. The margin is hysteresis, so jitter at the edge does not flicker.
     cover_height: float = 0.25
     duck_margin: float = 0.03
-    # Reload: lower both arms and hold.
-    reload_hold_s: float = 0.7
-    max_ammo: int = 6
+    # Reload: ducking refills the magazine, so every reload costs time behind the wall.
+    max_ammo: int = 3
     max_hp: int = 100
     body_damage: int = 15
     head_damage: int = 35
@@ -105,6 +104,14 @@ class GameConfig:
     bullet_travel_s: float = 0.25
     round_end_s: float = 4.0
     practice_targets: int = 3
+    # Powerups (duel only): one is tossed up from below the screen every `powerup_interval_s`,
+    # flies in a ballistic arc (peak after `powerup_rise_s`) and falls back out. Shooting it
+    # gives its effect to the shooter.
+    powerup_interval_s: float = 30.0
+    powerup_rise_s: float = 1.8
+    powerup_radius: float = 0.045  # fraction of screen height
+    heal_hp: int = 35
+    double_damage_s: float = 10.0
 
 
 @dataclass

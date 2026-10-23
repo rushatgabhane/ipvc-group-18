@@ -3,7 +3,7 @@
 Layer order, back to front:
   1. players (already composited onto the backdrop by the renderer)
   2. the wall, which occludes the lower body, so a ducking player disappears behind it
-  3. bottles, particles
+  3. bottles, the flying powerup, particles
   4. additive glow layer: laser sights, tracers, muzzle flashes
   5. reticles, name tags above heads, floating numbers
   6. HUD cards, banner, announcements
@@ -68,6 +68,7 @@ class GameView:
         visible = [p for p in players if p.visible and game.states.get(p.id) is not None]
 
         self._draw_bottles(image, game, t, s)
+        self._draw_powerup(image, game, t, s)
         self._draw_particles(image)
         self._draw_glow(image, game, t, s)
         for pid, aim in game.aims.items():
@@ -97,6 +98,23 @@ class GameView:
             blit_center(image, assets.glow_sprite(int(target.radius * 3.2), (200, 240, 255)),
                         target.center[0], target.center[1] + bob, alpha=0.35)  # fmt: skip
             blit_center(image, sprite, target.center[0], target.center[1] + bob)
+
+    def _draw_powerup(self, image, game: Game, t: float, s: float) -> None:
+        pu = game.powerup
+        if pu is None:
+            return
+        color = assets.POWERUP_COLORS[pu.kind]
+        size = int(pu.radius * 2.2)
+        # Fading trail of earlier positions on the arc, then glow, the spinning token and its name.
+        for k in (3, 2, 1):
+            c = pu.center(max(pu.t_spawn, t - 0.035 * k))
+            cv2.circle(image, _pt(c), int(pu.radius * (1 - 0.18 * k)), color, -1, cv2.LINE_AA)
+        c = pu.center(t)
+        blit_center(image, assets.glow_sprite(int(pu.radius * 4), color), c[0], c[1], alpha=0.6)
+        token = assets.rotated(assets.powerup_sprite(size, pu.kind), math.sin((t - pu.t_spawn) * 3) * 25)
+        blit_center(image, token, c[0], c[1])
+        label = self.text.get(assets.POWERUP_LABELS[pu.kind], int(24 * s), color, HUD_FONT, stroke=2)
+        blit_center(image, label, c[0], c[1] - pu.radius - 16 * s)
 
     def _draw_particles(self, image) -> None:
         p = self.fx.particles
@@ -182,8 +200,15 @@ class GameView:
         frac = self._hp_shown.get(p.id, st.hp) / game.cfg.max_hp
         if frac > 0.01:
             rounded_rect(image, bx, by, bx + max(bh, int(bw * frac)), by + bh, bh // 2, _hp_color(frac))
-        if st.frame.ducked:
-            badge = self.text.get("DUCKED", int(22 * s), CREAM, HUD_FONT, stroke=2)
+        if st.shield and p.face is not None:  # bubble around the head while the shield is up
+            fx0, fy0, fx1, fy1 = p.face.bbox
+            r = int(0.65 * max(fx1 - fx0, fy1 - fy0))
+            centre = (int((fx0 + fx1) / 2), int((fy0 + fy1) / 2))
+            cv2.circle(image, centre, r, assets.POWERUP_COLORS["shield"], max(2, int(4 * s)), cv2.LINE_AA)
+        badges = [b for b, on in (("DUCKED", st.frame.ducked), ("SHIELD", st.shield),
+                                  ("2X", game.double_active(p.id))) if on]  # fmt: skip
+        if badges:
+            badge = self.text.get("  ".join(badges), int(22 * s), CREAM, HUD_FONT, stroke=2)
             blit_center(image, badge, cx, by + bh + 16 * s)
 
     def _draw_float_texts(self, image, t: float, s: float) -> None:
@@ -245,11 +270,24 @@ class GameView:
             )
 
             icon_h = int(22 * s)
+            ix = x0 + int(14 * s)
             for i in range(cfg.max_ammo):
                 icon = assets.bullet_icon(icon_h, i < st.ammo)
-                blit(image, icon, x0 + int(14 * s) + i * int(icon.shape[1] + 5 * s), y0 + int(66 * s))
+                blit(image, icon, ix, y0 + int(66 * s))
+                ix += int(icon.shape[1] + 5 * s)
+            status = []
+            if st.shield:
+                status.append(("SHIELD", assets.POWERUP_COLORS["shield"]))
+            if game.double_active(p.id):
+                left = math.ceil(st.double_until - t)
+                status.append((f"2X {left}S", assets.POWERUP_COLORS["double"]))
+            ix += int(10 * s)
+            for text, col in status:
+                sprite = self.text.get(text, int(20 * s), col, HUD_FONT)
+                blit(image, sprite, ix, y0 + int(68 * s))
+                ix += sprite.shape[1] + int(10 * s)
             if st.ammo == 0 and int(t * 3) % 2 == 0:
-                hint = self.text.get("RELOAD: LOWER BOTH ARMS", int(20 * s), GOLD, HUD_FONT)
+                hint = self.text.get("DUCK TO RELOAD", int(20 * s), GOLD, HUD_FONT)
                 blit(image, hint, x0 + cw - hint.shape[1] - int(12 * s), y0 + int(68 * s))
 
     def _draw_banner(self, image, game: Game, t: float, s: float) -> None:
@@ -257,8 +295,8 @@ class GameView:
         trigger = "CLOSE YOUR HAND TO SHOOT" if game.cfg.trigger == "fist" else "FLICK UP TO SHOOT"
         title, hint = {
             "idle": ("HIGH NOON", "STEP INTO VIEW"),
-            "practice": ("PRACTICE", f"POINT YOUR ARM  |  {trigger}  |  DUCK BEHIND THE WALL"),
-            "duel": ("DUEL", f"{trigger}  |  DUCK BEHIND THE WALL  |  FIRST TO ZERO LOSES"),
+            "practice": ("PRACTICE", f"POINT YOUR ARM  |  {trigger}  |  DUCK TO RELOAD"),
+            "duel": ("DUEL", f"{trigger}  |  DUCK TO RELOAD  |  SHOOT POWERUPS  |  FIRST TO ZERO LOSES"),
         }[game.mode]
         title_s = self.text.get(title, int(30 * s), GOLD, TITLE_FONT, stroke=2, stroke_color=(20, 30, 50))
         hint_s = self.text.get(hint, int(19 * s), CREAM, HUD_FONT)
@@ -319,7 +357,8 @@ def draw_signal_debug(image: np.ndarray, game: Game, players: list[Player], colo
         lines = [
             f"arm {s.extension:4.2f}  elev {np.degrees(s.elevation):+4.0f} (aim -50..80)",
             f"aim {'ON' if f.aiming else 'off'}  head {f.head_pos:.2f} (duck > {1 - cfg.cover_height:.2f})",
-            f"arms down {'YES' if s.arms_down else 'no'}  ammo {st.ammo}",
+            f"ammo {st.ammo}  shield {'ON' if st.shield else 'off'}"
+            f"  2x {'ON' if game.double_active(p.id) else 'off'}",
             "hand: not tracked"
             if s.hand_openness is None
             else f"hand {s.hand_openness:4.2f} {'FIST' if f.hand_closed else 'open'}"
