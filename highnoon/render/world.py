@@ -17,8 +17,6 @@ POWERUP_TRAIL = ((3, 0.46), (2, 0.64), (1, 0.82))
 ROCKET_FLAME = ((44, 22, (20, 70, 140)), (36, 13, (40, 150, 255)), (30, 7, (180, 240, 255)))
 FIREBALL = ((1.0, (20, 60, 200)), (0.75, (30, 140, 255)), (0.45, (170, 235, 255)))
 MUZZLE_RINGS = ((46, 0.25), (30, 0.5), (16, 1.0))
-GUN_LENGTH = 120
-GUN_HAND_OFFSET = 20
 
 
 class WorldView:
@@ -39,7 +37,7 @@ class WorldView:
         self._draw_grenade_warnings(image, game, t, scale)
         for player_id, aim in game.aims.items():
             color = self.colors.get(player_id, WHITE)
-            draw_gun(image, aim, color, scale)
+            draw_weapon(image, game, aim, color)
             if aim.path is not None:
                 self._draw_reticle(image, aim, color, t, scale)
 
@@ -180,12 +178,13 @@ def draw_crosshair(
         cv2.line(image, start, end, color, thickness, cv2.LINE_AA)
 
 
-def draw_gun(image, aim, color, scale: float) -> None:
-    direction = unit(aim.end - aim.origin)
-    right, left = assets.revolver(tuple(color), int(GUN_LENGTH * scale))
+def draw_weapon(image, game: Game, aim, color) -> None:
+    direction = aim.direction
+    reach_px = int((game.reach(aim.weapon) - game.cfg.hand_reach) * game.height)
+    right, left = assets.held_weapon(aim.weapon, tuple(color), reach_px)
     sprite = right if direction[0] >= 0 else left
     angle = math.degrees(math.atan2(float(direction[1]), float(direction[0])))
-    hand = aim.origin + direction * GUN_HAND_OFFSET * scale
+    hand = aim.origin + direction * game.cfg.hand_reach * game.height
     blit_center(image, assets.rotated(sprite, -angle), hand[0], hand[1])
 
 

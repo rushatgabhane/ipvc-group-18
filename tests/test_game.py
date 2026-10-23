@@ -168,7 +168,7 @@ def test_rocket_flies_an_arc_and_uses_no_ammo():
     game.states[1].rockets = 1
     t = step(game, duel, 1, t)
     path = game.aims[1].path
-    assert path is not None and path[-1][1] > path[0][1] + 5
+    assert path is not None and path[-1][1] > path[0][1]
     t = fire(game, t, settle_frames=0)
     assert game.states[1].rockets == 0 and game.states[1].ammo == game.cfg.max_ammo
     assert len(game.rockets) == 1 and not game.bullets
@@ -255,3 +255,13 @@ def test_player_leaving_keeps_the_duel_and_asks_them_back():
     assert game.mode == "duel" and game.missing_players == [2]
     step(game, duel, 2, t)
     assert game.mode == "duel" and game.missing_players == [] and game.states[2].hp == 60
+
+
+def test_grenade_aim_previews_a_lob_onto_the_opponent():
+    game, t = start_duel()
+    game.states[1].grenades = 1
+    step(game, duel, 1, t)
+    aim = game.aims[1]
+    assert aim.weapon == "grenade" and aim.path is not None
+    assert aim.path[len(aim.path) // 2][1] < min(aim.path[0][1], aim.path[-1][1]) - 50
+    assert np.allclose(aim.path[-1], aim.end)

@@ -13,7 +13,7 @@ SOUND_FILES = (
     "dry_fire",
     "countdown",
 )
-MUZZLE_SOUNDS = {"": "gunshot", "rocket": "rocket_launch", "grenade": "grenade_throw"}
+MUZZLE_SOUNDS = {"gun": "gunshot", "rocket": "rocket_launch", "grenade": "grenade_throw"}
 EFFECT_SOUNDS = {
     "explosion": "explosion",
     "reload": "reload",

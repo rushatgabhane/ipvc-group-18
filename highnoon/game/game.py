@@ -29,6 +29,7 @@ TORSO_HITBOX_SCALE = 1.15
 DEFAULT_TORSO_PX = 100.0
 ROCKET_MAX_FLIGHT_S = 4.0
 ARC_PREVIEW_STEP_S = 0.04
+LOB_PREVIEW_STEPS = np.linspace(0.0, 1.0, 25, dtype=np.float32)
 ARC_PREVIEW_STEPS = 60
 GRENADE_BLAST_SCALE = 1.4
 
@@ -170,28 +171,36 @@ class Game:
         return next((p for p in self._players.values() if p.id != player_id and p.id in self._hitboxes), None)
 
     def _fire(self, shooter: int, state: PlayerState, shot: Shot, t: float) -> None:
-        shot = Shot(self.muzzle(shot.origin, shot.direction), shot.direction)
         opponent = self._opponent_of(shooter)
-        weapon = ""
-        if state.grenades > 0 and opponent is not None:
-            state.grenades -= 1
-            weapon = "grenade"
-            self._throw_grenade(shooter, opponent, shot.origin, t)
-        elif state.rockets > 0:
-            state.rockets -= 1
-            weapon = "rocket"
-            velocity, gravity = self._rocket_launch(shot.direction)
-            self.rockets.append(Rocket(shooter, shot.origin, velocity, gravity, t, shot.origin.copy()))
-        elif state.ammo > 0:
-            state.ammo -= 1
-            length, _ = self._cast(shooter, shot.origin, shot.direction)
-            arrival = t + self.cfg.bullet_travel_s
-            self.bullets.append(Bullet(shooter, shot.origin, shot.direction, length, t, arrival))
-        else:
-            self.effects.append(Effect("dry_fire", shot.origin, t, shooter))
+        weapon = self.weapon_of(state, opponent)
+        origin = self.muzzle(shot.origin, shot.direction, weapon)
+        if weapon == "gun" and state.ammo == 0:
+            self.effects.append(Effect("dry_fire", origin, t, shooter))
             state.last_ignored_fist = ("no ammo", t)
             return
-        self.effects.append(Effect("muzzle", shot.origin, t, shooter, detail=weapon))
+        if weapon == "grenade":
+            state.grenades -= 1
+            self._throw_grenade(shooter, opponent, origin, t)
+        elif weapon == "rocket":
+            state.rockets -= 1
+            velocity, gravity = self._rocket_launch(shot.direction)
+            self.rockets.append(Rocket(shooter, origin, velocity, gravity, t, origin.copy()))
+        else:
+            state.ammo -= 1
+            length, _ = self._cast(shooter, origin, shot.direction)
+            arrival = t + self.cfg.bullet_travel_s
+            self.bullets.append(Bullet(shooter, origin, shot.direction, length, t, arrival))
+        self.effects.append(Effect("muzzle", origin, t, shooter, detail=weapon))
+
+    @staticmethod
+    def weapon_of(state: PlayerState, opponent: Player | None) -> str:
+        if state.grenades > 0 and opponent is not None:
+            return "grenade"
+        return "rocket" if state.rockets > 0 else "gun"
+
+    def reach(self, weapon: str) -> float:
+        cfg = self.cfg
+        return {"gun": cfg.gun_reach, "rocket": cfg.rocket_reach, "grenade": cfg.grenade_reach}[weapon]
 
     def _resolve_bullets(self, t: float) -> None:
         in_flight = []
@@ -263,9 +272,7 @@ class Game:
             if target is not None and target.id in self._hitboxes:
                 grenade.landing = self._grenade_landing(target)
             progress = grenade.progress(t)
-            lob = 4 * self.cfg.grenade_arc * self.height * progress * (1 - progress)
-            grenade.pos = grenade.origin + (grenade.landing - grenade.origin) * progress
-            grenade.pos[1] -= lob
+            grenade.pos = self.lob_path(grenade.origin, grenade.landing, np.array([progress], np.float32))[0]
             if progress < 1.0:
                 in_flight.append(grenade)
             else:
@@ -306,8 +313,13 @@ class Game:
             self.round_over_t = t
             self.scores[shooter] = self.scores.get(shooter, 0) + 1
 
-    def muzzle(self, hand: np.ndarray, direction: np.ndarray) -> np.ndarray:
-        return (hand + direction * self.cfg.gun_reach * self.height).astype(np.float32)
+    def muzzle(self, hand: np.ndarray, direction: np.ndarray, weapon: str = "gun") -> np.ndarray:
+        return (hand + direction * self.reach(weapon) * self.height).astype(np.float32)
+
+    def lob_path(self, origin: np.ndarray, landing: np.ndarray, progress: np.ndarray) -> np.ndarray:
+        path = origin + np.outer(progress, landing - origin)
+        path[:, 1] -= 4 * self.cfg.grenade_arc * self.height * progress * (1 - progress)
+        return path.astype(np.float32)
 
     def _cast(self, shooter: int, origin: np.ndarray, direction: np.ndarray):
         reach = ray_exit_distance(origin, direction, self.width, self.height)
@@ -362,18 +374,25 @@ class Game:
             if state is None or not (player.visible and state.frame.aiming and player.signals is not None):
                 continue
             origin, direction = player.signals.aim_origin, player.signals.aim_dir
-            if state.rockets > 0:
-                muzzle = self.muzzle(origin, direction)
+            opponent = self._opponent_of(player.id)
+            weapon = self.weapon_of(state, opponent)
+            muzzle = self.muzzle(origin, direction, weapon)
+            spread = state.frame.spread_deg
+            if weapon == "grenade":
+                landing = self._grenade_landing(opponent)
+                path = self.lob_path(muzzle, landing, LOB_PREVIEW_STEPS)
+                self.aims[player.id] = Aim(origin, landing, True, path, spread, direction, weapon)
+            elif weapon == "rocket":
                 path, (kind, target) = self._predict_arc(player.id, muzzle, direction)
                 lands_on_player = kind in ("head", "body", "powerup") or (
                     kind == "cover" and target is not None
                 )
-                self.aims[player.id] = Aim(origin, path[-1], lands_on_player, path, state.frame.spread_deg)
+                self.aims[player.id] = Aim(origin, path[-1], lands_on_player, path, spread, direction, weapon)
             else:
-                distance, (kind, _) = self._cast(player.id, origin, direction)
-                end = origin + direction * distance
+                distance, (kind, _) = self._cast(player.id, muzzle, direction)
+                end = muzzle + direction * distance
                 on_target = kind in ("head", "body", "powerup")
-                self.aims[player.id] = Aim(origin, end, on_target, None, state.frame.spread_deg)
+                self.aims[player.id] = Aim(origin, end, on_target, None, spread, direction, weapon)
 
     def _update_powerup(self, t: float) -> None:
         if self.powerup is not None and t >= self.powerup.t_end:

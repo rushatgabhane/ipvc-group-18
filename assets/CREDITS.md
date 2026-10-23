@@ -5,6 +5,7 @@
 | `fonts/Rye-Regular.ttf` | Google Fonts | Nicole Fally | SIL OFL 1.1 (`fonts/OFL-Rye.txt`) |
 | `fonts/BebasNeue-Regular.ttf` | Google Fonts | Dharma Type | SIL OFL 1.1 (`fonts/OFL-BebasNeue.txt`) |
 | `sprites/revolver.png` | [Revolver Icons Pack](https://opengameart.org/content/revolver-icons-pack) (`silver.png`) | YuriNikolai | CC0 1.0 |
+| `sprites/rocket_launcher.png`, `rocket.png`, `grenade.png` | [2D Gun Pack](https://opengameart.org/node/146199) (`RocketLauncher.png` split into launcher and rocket, `Frag Grenade.png`) | ItzNinjaFool | CC0 1.0 |
 | `sounds/gunshot.wav` | [The Free Firearm Sound Library](https://opengameart.org/content/the-free-firearm-sound-library) (Smith & Wesson 642 .38 Special revolver, near, `V_27P.wav`, trimmed to 1.6 s) | Free Firearm SFX Library team | CC0 1.0 |
 | `sounds/rocket_launch.wav` | [The Free Firearm Sound Library](https://opengameart.org/content/the-free-firearm-sound-library) (Winchester Model 12 shotgun, near, `K_22P.wav`, trimmed) | Free Firearm SFX Library team | CC0 1.0 |
 | `sounds/explosion.wav` | [Explosion-LS100155.ogg](https://commons.wikimedia.org/wiki/File:Explosion-LS100155.ogg) (recorded at the Toshogu Spring Festival, Nikko) | Fg2, Wikimedia Commons | Public domain |

@@ -112,3 +112,5 @@ class Aim:
     on_target: bool
     path: np.ndarray | None = None
     spread_deg: float = 0.0
+    direction: np.ndarray | None = None
+    weapon: str = "gun"

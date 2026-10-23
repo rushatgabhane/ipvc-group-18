@@ -11,9 +11,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 ASSET_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
 FONT_DIR = ASSET_DIR / "fonts"
-REVOLVER_PATH = ASSET_DIR / "sprites" / "revolver.png"
-REVOLVER_GRIP = (10, 3)
-REVOLVER_OUTLINE_PX = 2
+SPRITE_DIR = ASSET_DIR / "sprites"
+OUTLINE_PX = 2
 TITLE_FONT = FONT_DIR / "Rye-Regular.ttf"
 HUD_FONT = FONT_DIR / "BebasNeue-Regular.ttf"
 SUPERSAMPLE = 4
@@ -21,6 +20,20 @@ ROTATION_STEP_DEG = 4
 
 POWERUP_COLORS = {"rocket": (30, 120, 240), "grenade": (60, 150, 70)}
 POWERUP_LABELS = {"rocket": "ROCKET LAUNCHER", "grenade": "GRENADE"}
+
+
+@dataclass(frozen=True)
+class WeaponArt:
+    file: str
+    grip: tuple[float, float]
+    muzzle: tuple[float, float]
+
+
+WEAPON_ART = {
+    "gun": WeaponArt("revolver.png", (10, 3), (59, 2)),
+    "rocket": WeaponArt("rocket_launcher.png", (42, 10), (168, 10)),
+    "grenade": WeaponArt("grenade.png", (6, 6), (12, 6)),
+}
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -72,23 +85,40 @@ def scaled(sprite: Sprite, scale: float) -> Sprite:
 
 
 @lru_cache(maxsize=8)
-def revolver(color: tuple[int, int, int], length: int) -> tuple[Sprite, Sprite]:
-    art = cv2.imread(str(REVOLVER_PATH), cv2.IMREAD_UNCHANGED)
-    zoom = length / art.shape[1]
-    gun = cv2.resize(art, None, fx=zoom, fy=zoom, interpolation=cv2.INTER_NEAREST)
-    gun = cv2.copyMakeBorder(gun, *[REVOLVER_OUTLINE_PX] * 4, cv2.BORDER_CONSTANT, value=(0, 0, 0, 0))
-    grip = np.array(REVOLVER_GRIP, np.float32) * zoom + REVOLVER_OUTLINE_PX
-    corners = np.array([[0, 0], [gun.shape[1], 0], [0, gun.shape[0]], [gun.shape[1], gun.shape[0]]])
-    half = int(np.ceil(np.linalg.norm(corners - grip, axis=1).max()))
-    canvas = np.zeros((2 * half, 2 * half, 4), np.uint8)
-    x0, y0 = half - int(round(grip[0])), half - int(round(grip[1]))
-    canvas[y0 : y0 + gun.shape[0], x0 : x0 + gun.shape[1]] = gun
-    right = Sprite.from_bgra(outlined(canvas, color))
+def sprite_art(file: str) -> np.ndarray:
+    return cv2.imread(str(SPRITE_DIR / file), cv2.IMREAD_UNCHANGED)
+
+
+@lru_cache(maxsize=16)
+def held_weapon(kind: str, color: tuple[int, int, int], reach_px: int) -> tuple[Sprite, Sprite]:
+    spec = WEAPON_ART[kind]
+    art = sprite_art(spec.file)
+    zoom = reach_px / float(np.linalg.norm(np.subtract(spec.muzzle, spec.grip)))
+    weapon = cv2.resize(art, None, fx=zoom, fy=zoom, interpolation=cv2.INTER_NEAREST)
+    weapon = cv2.copyMakeBorder(weapon, *[OUTLINE_PX] * 4, cv2.BORDER_CONSTANT, value=(0, 0, 0, 0))
+    right = Sprite.from_bgra(outlined(centered_on(weapon, np.array(spec.grip) * zoom + OUTLINE_PX), color))
     return right, Sprite.from_bgra(np.ascontiguousarray(right.bgra[::-1]))
 
 
+def centered_on(bgra: np.ndarray, pivot: np.ndarray) -> np.ndarray:
+    height, width = bgra.shape[:2]
+    corners = np.array([[0, 0], [width, 0], [0, height], [width, height]])
+    half = int(np.ceil(np.linalg.norm(corners - pivot, axis=1).max()))
+    canvas = np.zeros((2 * half, 2 * half, 4), np.uint8)
+    x0, y0 = half - int(round(pivot[0])), half - int(round(pivot[1]))
+    canvas[y0 : y0 + height, x0 : x0 + width] = bgra
+    return canvas
+
+
+def art_sprite(file: str, width: int) -> Sprite:
+    art = sprite_art(file)
+    zoom = width / art.shape[1]
+    scaled_art = cv2.resize(art, None, fx=zoom, fy=zoom, interpolation=cv2.INTER_NEAREST)
+    return Sprite.from_bgra(centered_on(scaled_art, np.array(scaled_art.shape[1::-1]) / 2))
+
+
 def outlined(bgra: np.ndarray, color: tuple[int, int, int]) -> np.ndarray:
-    size = 2 * REVOLVER_OUTLINE_PX + 1
+    size = 2 * OUTLINE_PX + 1
     ring = cv2.dilate(bgra[:, :, 3], cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
     weight = bgra[:, :, 3:].astype(np.float32) / 255
     out = np.empty_like(bgra)
@@ -121,12 +151,6 @@ def supersampled(width: int, height: int) -> tuple[np.ndarray, int, int]:
 
 def downsample(canvas: np.ndarray, width: int, height: int) -> Sprite:
     return Sprite.from_bgra(cv2.resize(canvas, (width, height), interpolation=cv2.INTER_AREA))
-
-
-def outline(canvas: np.ndarray, color: tuple[int, int, int], thickness: int) -> None:
-    kernel = np.ones((thickness, thickness), np.uint8)
-    edge = cv2.morphologyEx(canvas[:, :, 3].copy(), cv2.MORPH_GRADIENT, kernel)
-    canvas[edge > 0, :3] = color
 
 
 @lru_cache(maxsize=16)
@@ -280,72 +304,12 @@ def draw_grenade_icon(canvas: np.ndarray, c: int, k: float) -> None:
 
 @lru_cache(maxsize=4)
 def grenade_sprite(height: int) -> Sprite:
-    canvas, s, _ = supersampled(height, height)
-    c = s // 2
-    rx, ry = int(s * 0.28), int(s * 0.34)
-    cy = c + int(s * 0.06)
-    olive, groove, light = (50, 95, 70, 255), (25, 50, 35, 255), (120, 175, 140, 170)
-    cv2.ellipse(canvas, (c, cy), (rx, ry), 0, 0, 360, olive, -1, cv2.LINE_AA)
-    for row in (-2, -1, 0, 1, 2):
-        y = cy + row * ry // 3
-        half = int(rx * np.sqrt(max(0.0, 1 - (row / 3) ** 2)))
-        cv2.line(canvas, (c - half, y), (c + half, y), groove, SUPERSAMPLE)
-    for column in (-1, 0, 1):
-        cv2.ellipse(canvas, (c + column * rx // 2, cy), (max(1, rx // 6), ry), 0, 0, 360, groove, SUPERSAMPLE)
-    cv2.ellipse(canvas, (c - rx // 3, cy - ry // 3), (rx // 4, ry // 5), -30, 0, 360, light, -1, cv2.LINE_AA)
-    top = cy - ry
-    fuse_top = top - int(s * 0.08)
-    cv2.rectangle(canvas, (c - rx // 3, fuse_top), (c + rx // 3, top + SUPERSAMPLE), (90, 90, 95, 255), -1)
-    lever = np.array(
-        [
-            (c + rx // 3, fuse_top),
-            (c + rx // 2, top - int(s * 0.1)),
-            (c + int(rx * 0.9), cy - ry // 4),
-            (c + int(rx * 0.75), cy - ry // 4),
-        ],
-        np.int32,
-    )
-    cv2.fillPoly(canvas, [lever], (120, 120, 125, 255), cv2.LINE_AA)
-    ring = (c - rx // 2, top - int(s * 0.06))
-    cv2.circle(canvas, ring, int(s * 0.06), (170, 200, 215, 255), 2 * SUPERSAMPLE, cv2.LINE_AA)
-    outline(canvas, (15, 30, 20), 2 * SUPERSAMPLE)
-    return downsample(canvas, height, height)
+    return art_sprite("grenade.png", height)
 
 
 @lru_cache(maxsize=4)
 def rocket_sprite(length: int) -> Sprite:
-    canvas, s, _ = supersampled(length, length)
-    cy = s // 2
-    half_body = int(s * 0.075)
-    body, body_shadow, red, red_dark = (
-        (75, 115, 95, 255),
-        (45, 70, 55, 255),
-        (45, 45, 205, 255),
-        (30, 30, 140),
-    )
-    x_tail, x_nose, x_tip = int(s * 0.12), int(s * 0.72), int(s * 0.9)
-    for side in (-1, 1):
-        fin = [
-            (x_tail, cy + side * half_body),
-            (x_tail + int(s * 0.2), cy + side * half_body),
-            (x_tail - int(s * 0.02), cy + side * int(s * 0.19)),
-        ]
-        cv2.fillPoly(canvas, [np.array(fin, np.int32)], red, cv2.LINE_AA)
-    nozzle = int(half_body * 0.7)
-    cv2.rectangle(canvas, (x_tail - int(s * 0.05), cy - nozzle), (x_tail, cy + nozzle), (60, 60, 60, 255), -1)
-    cv2.rectangle(canvas, (x_tail, cy - half_body), (x_nose, cy + half_body), body, -1)
-    nose = np.array([(x_nose, cy - half_body), (x_tip, cy), (x_nose, cy + half_body)], np.int32)
-    cv2.fillPoly(canvas, [nose], red, cv2.LINE_AA)
-    cv2.rectangle(
-        canvas, (int(s * 0.58), cy - half_body), (int(s * 0.62), cy + half_body), (200, 225, 235, 255), -1
-    )
-    cv2.rectangle(canvas, (x_tail, cy + half_body // 3), (x_nose, cy + half_body), body_shadow, -1)
-    highlight_y = cy - half_body // 2
-    cv2.line(
-        canvas, (x_tail + 8, highlight_y), (x_nose - 8, highlight_y), (170, 210, 190, 255), 2 * SUPERSAMPLE
-    )
-    outline(canvas, red_dark, 2 * SUPERSAMPLE)
-    return downsample(canvas, length, length)
+    return art_sprite("rocket.png", length)
 
 
 def desert_background(width: int, height: int, seed: int = 7) -> np.ndarray:
