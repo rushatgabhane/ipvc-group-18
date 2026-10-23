@@ -42,7 +42,10 @@ class Hud:
         scale = height / 720.0
         announcements = [effects.HEADSHOT, effects.BOOM, effects.GRENADE_BOOM, effects.GRENADE_WARNING]
         for player_id in self.colors:
-            announcements += [effects.pickup_announcement(player_id, kind) for kind in assets.POWERUP_LABELS]
+            color = self.colors[player_id]
+            announcements += [
+                effects.pickup_announcement(player_id, kind, color) for kind in assets.POWERUP_LABELS
+            ]
             self._winner_name(player_id, scale)
         for text, color, size in announcements:
             self._announcement_sprite(text, size, color, scale)
@@ -243,7 +246,9 @@ class Hud:
         x += int(10 * scale)
         for kind, held in (("rocket", state.rockets), ("grenade", state.grenades)):
             if held:
-                sprite = self.text.get(kind.upper(), int(20 * scale), assets.POWERUP_COLORS[kind], HUD_FONT)
+                sprite = self.text.get(
+                    kind.upper(), int(20 * scale), self.colors.get(player_id, WHITE), HUD_FONT
+                )
                 blit(image, sprite, x, y0 + int(68 * scale))
                 x += sprite.width + int(10 * scale)
         if state.ammo == 0 and int(t * 3) % 2 == 0:

@@ -18,8 +18,8 @@ GRENADE_WARNING = ("GRENADE! DUCK!", (60, 60, 240), 84)
 PICKUP_SIZE = 72
 
 
-def pickup_announcement(player_id: int, kind: str) -> tuple[str, tuple[int, int, int], int]:
-    return f"P{player_id}: {POWERUP_LABELS[kind]}", POWERUP_COLORS[kind], PICKUP_SIZE
+def pickup_announcement(player_id: int, kind: str, color) -> tuple[str, tuple[int, int, int], int]:
+    return f"P{player_id}: {POWERUP_LABELS[kind]}", color, PICKUP_SIZE
 
 
 @dataclass
@@ -102,7 +102,8 @@ class Particles:
 
 
 class FX:
-    def __init__(self):
+    def __init__(self, player_colors: dict[int, tuple[int, int, int]]):
+        self.player_colors = player_colors
         self.particles = Particles()
         self.texts: list[FloatText] = []
         self.announcements: list[Announcement] = []
@@ -196,8 +197,8 @@ class FX:
         self._float_text("SAFE!", effect, t, (140, 240, 160), 52)
 
     def _pickup(self, effect, t: float) -> None:
-        color, label = POWERUP_COLORS[effect.detail], POWERUP_LABELS[effect.detail]
-        self.particles.burst(effect.pos, 40, color, (150, 500), (0.3, 0.8), (2, 6))
+        player_color = self.player_colors.get(effect.player, (255, 255, 255))
+        self.particles.burst(effect.pos, 40, POWERUP_COLORS[effect.detail], (150, 500), (0.3, 0.8), (2, 6))
         self.particles.burst(effect.pos, 16, (255, 255, 255), (80, 260), (0.1, 0.3), (2, 3), gravity=False)
-        self._float_text(label, effect, t, color, 48)
-        self._announce(pickup_announcement(effect.player, effect.detail), t, duration=1.2)
+        self._float_text(POWERUP_LABELS[effect.detail], effect, t, player_color, 48)
+        self._announce(pickup_announcement(effect.player, effect.detail, player_color), t, duration=1.2)

@@ -27,7 +27,7 @@ class Renderer:
     def __init__(self, cfg: DisplayConfig):
         self.cfg = cfg
         self.text = assets.TextCache()
-        self.fx = FX()
+        self.fx = FX(PLAYER_COLORS)
         self.world = WorldView(PLAYER_COLORS, self.text, self.fx)
         self.hud = Hud(PLAYER_COLORS, self.text, self.fx)
         self.shake = (0, 0)
