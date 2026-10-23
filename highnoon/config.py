@@ -69,7 +69,6 @@ class GameConfig:
     bullet_travel_s: float = 0.45
     round_end_s: float = 4.0
     countdown_s: float = 3.0
-    player_grace_s: float = 5.0
     powerup_interval_s: float = 15.0
     powerup_fall_s: float = 5.0
     powerup_radius: float = 0.08

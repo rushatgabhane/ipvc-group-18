@@ -221,14 +221,6 @@ def test_countdown_starts_only_with_both_players_and_blocks_shooting():
     assert game.mode == "duel"
 
 
-def test_short_detection_loss_does_not_cancel_the_duel():
-    game, t = start_duel()
-    t = step(game, alone, 5, t)
-    assert game.mode == "duel"
-    step(game, alone, int(game.cfg.player_grace_s / DT) + 2, t)
-    assert game.mode == "idle"
-
-
 def test_three_headshots_do_not_kill():
     game, _ = start_duel()
     assert 3 * game.cfg.head_damage < game.cfg.max_hp
@@ -256,20 +248,10 @@ def test_camping_to_zero_hands_the_round_to_the_opponent():
     assert game.states[1].hp == 0 and game.winner == 2
 
 
-def test_player_leaving_gets_five_seconds_to_return():
+def test_player_leaving_keeps_the_duel_and_asks_them_back():
     game, t = start_duel()
     game.states[2].hp = 60
-    t = step(game, alone, int(3 / DT), t)
-    assert game.mode == "duel" and 0 < game.return_time_left(t) <= 2.1
-    t = step(game, duel, 2, t)
-    assert game.mode == "duel" and game.states[2].hp == 60 and game.return_time_left(t) == 0
-
-
-def test_player_leaving_pauses_the_game_and_it_resumes_with_hp_kept():
-    game, t = start_duel()
-    game.states[2].hp = 60
-    t = step(game, alone, int((game.cfg.player_grace_s + 1) / DT), t)
-    assert game.mode == "idle" and game.round_paused
-    t = step(game, duel, int((game.cfg.countdown_s + 0.2) / DT), t)
-    assert game.mode == "duel" and not game.round_paused
-    assert game.states[2].hp == 60 and game.scores == {}
+    t = step(game, alone, int(20 / DT), t)
+    assert game.mode == "duel" and game.missing_players == [2]
+    step(game, duel, 2, t)
+    assert game.mode == "duel" and game.missing_players == [] and game.states[2].hp == 60

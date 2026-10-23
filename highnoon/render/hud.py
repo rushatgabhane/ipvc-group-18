@@ -65,8 +65,8 @@ class Hud:
             self._camping_sprite(warning, scale)
         self.text.get("RELOADING", int(26 * scale), GOLD, HUD_FONT, stroke=2)
         self._waiting_sprites(scale)
-        for seconds_left in range(1, 6):
-            self._come_back_sprites(seconds_left, scale)
+        for player_id in self.colors:
+            self._come_back_sprite(player_id, scale)
         for mode in BANNERS:
             self._banner_sprites(mode, scale)
         for number in range(1, 4):
@@ -115,8 +115,7 @@ class Hud:
             self._draw_countdown(image, game.countdown_left(t), scale)
         if game.mode == "idle":
             self._draw_waiting(image, t, scale)
-        elif game.return_time_left(t) > 0:
-            self._draw_come_back(image, game.return_time_left(t), t, scale)
+        self._draw_come_back(image, game.missing_players, t, scale)
         self._draw_announcements(image, t, scale)
 
     def _waiting_sprites(self, scale: float):
@@ -132,16 +131,16 @@ class Hud:
         blit_center(image, assets.scaled(top, pulse), width / 2, height * 0.36)
         blit_center(image, assets.scaled(bottom, pulse), width / 2, height * 0.36 + top.height * 0.9)
 
-    def _come_back_sprites(self, seconds_left: int, scale: float):
-        title = self._announcement_sprite("PLAYER LEFT", 90, RED, scale)
-        return title, self._announcement_sprite(f"COME BACK IN {seconds_left}", 64, CREAM, scale)
+    def _come_back_sprite(self, player_id: int, scale: float):
+        color = self.colors.get(player_id, WHITE)
+        return self._announcement_sprite(f"P{player_id}: COME BACK ON SCREEN", 64, color, scale)
 
-    def _draw_come_back(self, image, seconds_left: float, t: float, scale: float) -> None:
+    def _draw_come_back(self, image, missing: list[int], t: float, scale: float) -> None:
         height, width = image.shape[:2]
-        title, subtitle = self._come_back_sprites(math.ceil(seconds_left), scale)
         alpha = 1.0 if int(t * 3) % 2 == 0 else 0.7
-        blit_center(image, title, width / 2, height * 0.34, alpha)
-        blit_center(image, subtitle, width / 2, height * 0.34 + title.height * 0.85)
+        for row, player_id in enumerate(missing):
+            sprite = self._come_back_sprite(player_id, scale)
+            blit_center(image, sprite, width / 2, height * 0.3 + row * sprite.height, alpha)
 
     def _draw_countdown(self, image, seconds_left: float, scale: float) -> None:
         if seconds_left <= 0:

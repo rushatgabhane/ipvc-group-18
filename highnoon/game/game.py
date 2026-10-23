@@ -50,8 +50,6 @@ class Game:
         self.scores: dict[int, int] = {}
         self._next_powerup_t: float | None = None
         self.countdown_end_t: float | None = None
-        self._players_missing_since: float | None = None
-        self.round_paused = False
         self._rng = np.random.default_rng(seed)
         self._players: dict[int, Player] = {}
         self._hitboxes: dict[int, Hitbox] = {}
@@ -93,44 +91,23 @@ class Game:
     def round_live(self) -> bool:
         return self.mode == "duel" and self.round_over_t is None
 
-    def return_time_left(self, t: float) -> float:
-        if self.mode == "idle" or self._players_missing_since is None:
-            return 0.0
-        return max(0.0, self.cfg.player_grace_s - (t - self._players_missing_since))
+    @property
+    def missing_players(self) -> list[int]:
+        if self.mode != "duel":
+            return []
+        return [player.id for player in self._players.values() if not player.visible]
 
     def countdown_left(self, t: float) -> float:
         return max(0.0, self.countdown_end_t - t) if self.mode == "countdown" else 0.0
 
     def _update_mode(self, both_in_view: bool, t: float) -> None:
-        if both_in_view:
-            self._players_missing_since = None
-        elif self._players_missing_since is None:
-            self._players_missing_since = t
-        players_gone = self._players_missing_since is not None and (
-            t - self._players_missing_since > self.cfg.player_grace_s
-        )
         if self.mode == "idle" and both_in_view:
             self.mode, self.countdown_end_t = "countdown", t + self.cfg.countdown_s
-        elif self.mode == "countdown" and players_gone:
+        elif self.mode == "countdown" and not both_in_view:
             self.mode = "idle"
         elif self.mode == "countdown" and t >= self.countdown_end_t:
-            if not self.round_paused:
-                self.reset_round()
-            self.round_paused = False
+            self.reset_round()
             self.mode = "duel"
-        elif self.mode == "duel" and players_gone:
-            self.mode = "idle"
-            self._pause_round()
-
-    def _pause_round(self) -> None:
-        if self.winner is not None:
-            return
-        self.bullets.clear()
-        self.rockets.clear()
-        self.grenades.clear()
-        self.powerup = None
-        self._next_powerup_t = None
-        self.round_paused = True
 
     def blast_radius(self, grenade: bool = False) -> float:
         return self.cfg.rocket_blast_radius * self.height * (GRENADE_BLAST_SCALE if grenade else 1.0)
@@ -146,7 +123,6 @@ class Game:
         self._next_powerup_t = None
         self.winner = None
         self.round_over_t = None
-        self.round_paused = False
 
     def _create_states(self, players: list[Player], reassigned: set[int]) -> None:
         for player in players:
