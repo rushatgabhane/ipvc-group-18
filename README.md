@@ -97,8 +97,8 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
   down 3-2-1, and every new round starts with the same countdown. Nobody can shoot during it.
 - **Duel.** A body hit costs 10 HP and a headshot 25 (4 headshots or 10 body hits to win). First to 0 loses the round.
   Bullets take 0.45 s to arrive, so you can duck when you see your opponent fire.
-- **Powerups (duel only).** Every 15 s a powerup is tossed up from below the screen, flies in an
-  arc and falls back out. Whoever shoots it first gets it (lead your shot: it moves):
+- **Powerups (duel only).** Every 15 s a powerup drops from the top of the screen down the
+  middle and disappears behind the wall. Whoever shoots it first gets it (lead your shot: it moves):
 
   | Powerup | Effect |
   |---|---|

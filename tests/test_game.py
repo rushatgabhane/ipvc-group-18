@@ -129,7 +129,7 @@ def test_one_player_is_not_a_game():
     assert game.mode == "idle"
 
 
-def test_powerup_spawns_every_interval_in_duel_and_flies_an_arc():
+def test_powerup_spawns_every_interval_and_falls_down_the_middle():
     game, t = start_duel()
     cfg = game.cfg
     t = step(game, duel, int((cfg.powerup_interval_s - 1) / DT), t)
@@ -137,9 +137,9 @@ def test_powerup_spawns_every_interval_in_duel_and_flies_an_arc():
     step(game, duel, int(2 / DT), t)
     powerup = game.powerup
     assert powerup is not None
-    start, peak, end = (powerup.center(powerup.t_spawn + k * cfg.powerup_rise_s) for k in (0, 1, 2))
-    assert start[1] > 720 and end[1] == pytest.approx(start[1], abs=1e-2)
-    assert 0.2 * 720 < peak[1] < 0.75 * 720
+    start, end = powerup.center(powerup.t_spawn), powerup.center(powerup.t_end)
+    assert start[1] < 0 and end[1] == pytest.approx(game.wall_top, abs=0.5)
+    assert start[0] == end[0] and abs(start[0] - 640) <= cfg.powerup_center_spread * 1280
 
 
 def test_powerups_only_in_duel():

@@ -367,15 +367,13 @@ class Game:
             self._next_powerup_t = t + self.cfg.powerup_interval_s
 
     def _toss_powerup(self, t: float) -> Powerup:
-        rng, rise_s = self._rng, self.cfg.powerup_rise_s
+        rng, fall_s = self._rng, self.cfg.powerup_fall_s
         radius = self.cfg.powerup_radius * self.height
-        start = np.array([rng.uniform(0.3, 0.7) * self.width, self.height + radius], np.float32)
-        rise_px = float(start[1] - rng.uniform(0.22, 0.4) * self.height)
-        drift = rng.uniform(-self.cfg.powerup_drift, self.cfg.powerup_drift) * self.width
-        landing_x = float(np.clip(start[0] + drift, 0.15 * self.width, 0.85 * self.width))
-        velocity = np.array([(landing_x - start[0]) / (2 * rise_s), -2 * rise_px / rise_s], np.float32)
+        spread = self.cfg.powerup_center_spread
+        start = np.array([rng.uniform(0.5 - spread, 0.5 + spread) * self.width, -radius], np.float32)
+        velocity = np.array([0.0, (self.wall_top + radius) / fall_s], np.float32)
         kind = POWERUP_KINDS[int(rng.integers(len(POWERUP_KINDS)))]
-        return Powerup(kind, start, velocity, 2 * rise_px / rise_s**2, radius, t, t + 2 * rise_s)
+        return Powerup(kind, start, velocity, 0.0, radius, t, t + fall_s)
 
     def _collect(self, player_id: int, powerup: Powerup, pos: np.ndarray, t: float) -> None:
         self.powerup = None
