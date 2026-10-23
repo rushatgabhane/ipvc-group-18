@@ -91,7 +91,7 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 | **Shoot** | Aim with an **open hand**, then **close it into a fist**. Hold the hand open again briefly before the next shot (at most one shot every 0.6 s) |
 | **Duck** | Get your head below the top of the wall (the bottom 25% of the screen). You are safe there but cannot shoot |
 | **Reload** | Stay ducked for 0.8 s to refill the magazine (3 bullets). A bar under your name shows the progress |
-| **No camping** | After 5 s ducked you lose 5 HP every second until you stand up ("GET UP!" warns you from 3 s) |
+| **No camping** | After 7 s ducked you lose 5 HP every second until you stand up ("GET UP!" warns you from 5 s, then "GET OUT CAMPER!" while you are losing HP) |
 
 - **The game needs two players in view.** With fewer, it waits. When both are in view it counts
   down 3-2-1, and every new round starts with the same countdown. Nobody can shoot during it.
