@@ -17,6 +17,9 @@ POWERUP_TRAIL = ((3, 0.46), (2, 0.64), (1, 0.82))
 ROCKET_FLAME = ((44, 22, (20, 70, 140)), (36, 13, (40, 150, 255)), (30, 7, (180, 240, 255)))
 FIREBALL = ((1.0, (20, 60, 200)), (0.75, (30, 140, 255)), (0.45, (170, 235, 255)))
 MUZZLE_RINGS = ((46, 0.25), (30, 0.5), (16, 1.0))
+AIM_DOTS = 6
+AIM_DOT_GAP = 22
+AIM_DOT_START = 18
 
 
 class WorldView:
@@ -36,7 +39,8 @@ class WorldView:
         self._draw_shockwaves(image, game, t, scale)
         self._draw_grenade_warnings(image, game, t, scale)
         for player_id, aim in game.aims.items():
-            self._draw_reticle(image, aim, self.colors.get(player_id, WHITE), t, scale)
+            if aim.path is not None:
+                self._draw_reticle(image, aim, self.colors.get(player_id, WHITE), t, scale)
 
     def _draw_powerup(self, image, game: Game, t: float, scale: float) -> None:
         powerup = game.powerup
@@ -178,14 +182,14 @@ def draw_crosshair(
 
 
 def draw_laser(glow, aim, color, t: float, scale: float) -> None:
-    locked = aim.on_target
-    pulse = 0.85 + 0.15 * math.sin(t * (18 if locked else 9))
-    halo_width = max(2, int((11 if locked else 7) * scale))
-    start, end = point(aim.origin), point(aim.end)
-    cv2.line(glow, start, end, scaled_color(color, (0.5 if locked else 0.3) * pulse), halo_width, cv2.LINE_AA)
-    cv2.line(
-        glow, start, end, scaled_color(color, 1.0 if locked else 0.85), max(1, int(2 * scale)), cv2.LINE_AA
-    )
+    brightness = 1.0 if aim.on_target else 0.85
+    halo, core = scaled_color(color, 0.4 * brightness), scaled_color(color, brightness)
+    steps = (AIM_DOT_START + AIM_DOT_GAP * np.arange(AIM_DOTS)) * scale
+    reach = float(np.linalg.norm(aim.end - aim.origin))
+    dots = aim.origin + np.outer(steps[steps < reach], unit(aim.end - aim.origin))
+    for dot in dots.astype(np.int32).tolist():
+        cv2.circle(glow, dot, max(3, int(5 * scale)), halo, -1, cv2.LINE_AA)
+        cv2.circle(glow, dot, max(2, int(2.5 * scale)), core, -1, cv2.LINE_AA)
 
 
 def draw_arc_preview(glow, aim, color, t: float, scale: float) -> None:

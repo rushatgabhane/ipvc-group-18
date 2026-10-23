@@ -15,6 +15,10 @@ BOOM = ("BOOM!", (40, 150, 255), 120)
 GRENADE_BOOM = ("BOOM!", (40, 150, 255), int(120 * GRENADE_SCALE))
 GRENADE_WARNING = ("GRENADE! DUCK!", (60, 60, 240), 84)
 PICKUP_SIZE = 72
+ANNOUNCE_IN_S = 0.18
+ANNOUNCE_OUT_S = 0.2
+ANNOUNCE_MIN_HOLD_S = 0.45
+MAX_PENDING = 2
 
 
 def headshot_announcement(color) -> tuple[str, tuple[int, int, int], int]:
@@ -109,7 +113,8 @@ class FX:
         self.player_colors = player_colors
         self.particles = Particles()
         self.texts: list[FloatText] = []
-        self.announcements: list[Announcement] = []
+        self.announcement: Announcement | None = None
+        self.pending: list[Announcement] = []
         self._seen: set[int] = set()
         self._shake_t = -1.0
         self._shake_amp = 0.0
@@ -138,10 +143,35 @@ class FX:
         self._seen = current
         self.particles.update(dt)
         self.texts = [text for text in self.texts if t - text.t0 < text.duration]
-        self.announcements = [a for a in self.announcements if t - a.t0 < a.duration]
+        self._advance_announcements(t)
 
     def announce(self, text: str, t: float, color, size: int = 96, duration: float = 1.6) -> None:
-        self.announcements = [Announcement(text, t, color, duration, size)]
+        if any(a.text == text and a.color == color for a in self.pending):
+            return
+        self.pending = self.pending[-(MAX_PENDING - 1) :] + [Announcement(text, t, color, duration, size)]
+        self._advance_announcements(t)
+
+    def drop_pending(self) -> None:
+        self.pending.clear()
+        self._hurry_current()
+
+    def announcing(self) -> bool:
+        return self.announcement is not None or bool(self.pending)
+
+    def _advance_announcements(self, t: float) -> None:
+        current = self.announcement
+        if current is not None and t - current.t0 >= current.duration:
+            self.announcement = current = None
+        if current is None and self.pending:
+            self.announcement = self.pending.pop(0)
+            self.announcement.t0 = t
+        if self.pending:
+            self._hurry_current()
+
+    def _hurry_current(self) -> None:
+        if self.announcement is not None:
+            shortest = ANNOUNCE_IN_S + ANNOUNCE_MIN_HOLD_S + ANNOUNCE_OUT_S
+            self.announcement.duration = min(self.announcement.duration, shortest)
 
     def _announce(self, announcement: tuple, t: float, duration: float) -> None:
         text, color, size = announcement

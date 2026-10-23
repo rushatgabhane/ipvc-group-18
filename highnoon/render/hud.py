@@ -30,6 +30,9 @@ CAMPER_WARNING = "GET OUT CAMPER!"
 COUNTDOWN_SIZE = 220
 WAITING_LINES = (("TWO PLAYERS", 110), ("STEP INTO VIEW", 80))
 COUNTDOWN_COLOR = GOLD
+ZOOM_FROM = 0.3
+ZOOM_OVERSHOOT = 1.15
+SHRINK_TO = 0.4
 
 
 class Hud:
@@ -40,6 +43,7 @@ class Hud:
         self._tag_pos: dict[int, np.ndarray] = {}
         self._hp_shown: dict[int, float] = {}
         self._hp_trail: dict[int, float] = {}
+        self._winner_reveal_t: float | None = None
 
     def prewarm(self, height: int) -> None:
         scale = height / 720.0
@@ -105,7 +109,7 @@ class Hud:
             self._draw_card(image, game, player, t, scale)
         self._draw_reload_warnings(image, game, visible, t, scale)
         self._draw_banner(image, game, scale)
-        if game.winner is not None:
+        if self._winner_revealed(game, t):
             self._draw_winner(image, game, t, scale)
         if game.mode == "countdown":
             self._draw_countdown(image, game.countdown_left(t), scale)
@@ -324,27 +328,54 @@ class Hud:
         blit_center(image, title_sprite, width / 2, title_y)
         blit_center(image, hint_sprite, width / 2, title_y + title_sprite.height / 2 + hint_sprite.height / 2)
 
+    def _winner_revealed(self, game: Game, t: float) -> bool:
+        if game.winner is None:
+            self._winner_reveal_t = None
+            return False
+        if self._winner_reveal_t is None:
+            self.fx.drop_pending()
+            if self.fx.announcing():
+                return False
+            self._winner_reveal_t = t
+        return True
+
     def _draw_winner(self, image, game: Game, t: float, scale: float) -> None:
         height, width = image.shape[:2]
         cv2.convertScaleAbs(image, dst=image, alpha=0.45)
-        age = t - (game.round_over_t or t)
+        age = t - self._winner_reveal_t
         name = self._winner_name(game.winner, scale)
-        subtitle, countdown = self._round_over_texts(max(0, math.ceil(game.cfg.round_end_s - age)), scale)
+        left = game.cfg.round_end_s - (t - (game.round_over_t or t))
+        subtitle, countdown = self._round_over_texts(max(0, math.ceil(left)), scale)
+        zoom, alpha = zoom_in(age)
         y = height * 0.42
-        blit_center(image, assets.scaled(name, 1.0 + 0.25 * math.exp(-age * 6)), width / 2, y)
-        blit_center(image, subtitle, width / 2, y + name.height * 0.75)
-        blit_center(image, countdown, width / 2, y + name.height * 0.75 + subtitle.height * 1.2)
+        blit_center(image, assets.scaled(name, zoom), width / 2, y, alpha)
+        blit_center(image, subtitle, width / 2, y + name.height * 0.75, alpha)
+        blit_center(image, countdown, width / 2, y + name.height * 0.75 + subtitle.height * 1.2, alpha)
 
     def _draw_announcements(self, image, t: float, scale: float) -> None:
+        announcement = self.fx.announcement
+        if announcement is None:
+            return
         height, width = image.shape[:2]
-        for announcement in self.fx.announcements:
-            age = (t - announcement.t0) / announcement.duration
-            pop = 1.0 + 0.6 * max(0.0, 1 - age * 5)
-            alpha = 1.0 if age < 0.7 else max(0.0, 1 - (age - 0.7) / 0.3)
-            sprite = self._announcement_sprite(
-                announcement.text, announcement.size, announcement.color, scale
-            )
-            blit_center(image, assets.scaled(sprite, pop), width / 2, height * 0.36, alpha)
+        zoom, alpha = zoom_in_out(t - announcement.t0, announcement.duration)
+        sprite = self._announcement_sprite(announcement.text, announcement.size, announcement.color, scale)
+        blit_center(image, assets.scaled(sprite, zoom), width / 2, height * 0.36, alpha)
+
+
+def zoom_in(age: float) -> tuple[float, float]:
+    grow = min(1.0, age / effects.ANNOUNCE_IN_S)
+    settle = min(1.0, max(0.0, age - effects.ANNOUNCE_IN_S) / effects.ANNOUNCE_IN_S)
+    if grow < 1.0:
+        return ZOOM_FROM + (ZOOM_OVERSHOOT - ZOOM_FROM) * (1 - (1 - grow) ** 3), grow
+    return ZOOM_OVERSHOOT + (1.0 - ZOOM_OVERSHOOT) * settle, 1.0
+
+
+def zoom_in_out(age: float, duration: float) -> tuple[float, float]:
+    left = duration - age
+    if left >= effects.ANNOUNCE_OUT_S:
+        return zoom_in(age)
+    shrink = 1 - max(0.0, left) / effects.ANNOUNCE_OUT_S
+    return 1.0 + (SHRINK_TO - 1.0) * shrink**2, 1 - shrink
 
 
 def needs_reload(game: Game, player_id: int) -> bool:
