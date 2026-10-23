@@ -11,7 +11,10 @@ SOUND_FILES = (
     "explosion",
     "reload",
     "dry_fire",
-    "countdown",
+    "count_1",
+    "count_2",
+    "count_3",
+    "fight",
 )
 MUZZLE_SOUNDS = {"gun": "gunshot", "rocket": "rocket_launch", "grenade": "grenade_throw"}
 EFFECT_SOUNDS = {
@@ -36,6 +39,7 @@ class SoundBoard:
         }
         self._seen: set[int] = set()
         self._count: int | None = None
+        self._mode: str | None = None
 
     def update(self, game, t: float) -> None:
         current = {id(effect) for effect in game.effects}
@@ -44,6 +48,8 @@ class SoundBoard:
                 self._sources[name].play()
         self._seen = current
         count = math.ceil(game.countdown_left(t)) if game.mode == "countdown" else None
-        if count and count != self._count:
-            self._sources["countdown"].play()
-        self._count = count
+        if count in (1, 2, 3) and count != self._count:
+            self._sources[f"count_{count}"].play()
+        if game.mode == "duel" and self._mode == "countdown":
+            self._sources["fight"].play()
+        self._count, self._mode = count, game.mode

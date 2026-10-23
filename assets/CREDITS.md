@@ -9,8 +9,8 @@
 | `sounds/gunshot.wav` | [The Free Firearm Sound Library](https://opengameart.org/content/the-free-firearm-sound-library) (Smith & Wesson 642 .38 Special revolver, near, `V_27P.wav`, trimmed to 1.6 s) | Free Firearm SFX Library team | CC0 1.0 |
 | `sounds/rocket_launch.wav` | [The Free Firearm Sound Library](https://opengameart.org/content/the-free-firearm-sound-library) (Winchester Model 12 shotgun, near, `K_22P.wav`, trimmed) | Free Firearm SFX Library team | CC0 1.0 |
 | `sounds/explosion.wav` | [Explosion-LS100155.ogg](https://commons.wikimedia.org/wiki/File:Explosion-LS100155.ogg) (recorded at the Toshogu Spring Festival, Nikko) | Fg2, Wikimedia Commons | Public domain |
-| `sounds/dry_fire.wav` | [Impact Sounds](https://kenney.nl/assets/impact-sounds) (`impactMetal_light_000`) | Kenney | CC0 1.0 |
 | `sounds/reload.wav` | [Gun Reload Sound Effects](https://opengameart.org/content/gun-reload-sound-effects) (`singlebullet1` + `clipload1`) | Brian MacIntosh (BMacZero) | CC0 1.0 |
-| `sounds/countdown.wav` | [Gun Reload Sound Effects](https://opengameart.org/content/gun-reload-sound-effects) (`clipload2`) | Brian MacIntosh (BMacZero) | CC0 1.0 |
+| `sounds/dry_fire.wav` | [Gun Reload Sound Effects](https://opengameart.org/content/gun-reload-sound-effects) (`singlebullet1`, the first click only, 48 ms) | Brian MacIntosh (BMacZero) | CC0 1.0 |
+| `sounds/count_3.wav`, `count_2.wav`, `count_1.wav`, `fight.wav` | [Voiceover Pack: Fighter](https://kenney.nl/assets/voiceover-pack-fighter) (`3`, `2`, `1`, `fight`; leading silence trimmed) | Kenney | CC0 1.0 |
 
 `sounds/grenade_throw.wav` is a band-passed noise swoosh generated for this project.
