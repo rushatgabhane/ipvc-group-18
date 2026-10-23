@@ -68,7 +68,7 @@ class GameConfig:
     round_end_s: float = 4.0
     countdown_s: float = 3.0
     player_grace_s: float = 1.0
-    powerup_interval_s: float = 30.0
+    powerup_interval_s: float = 15.0
     powerup_rise_s: float = 2.8
     powerup_radius: float = 0.08
     powerup_hit_scale: float = 1.3
