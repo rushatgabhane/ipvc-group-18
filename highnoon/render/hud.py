@@ -102,13 +102,16 @@ class Hud:
     def draw(self, image: np.ndarray, game: Game, players: list[Player], t: float, dt: float) -> None:
         scale = image.shape[0] / 720.0
         visible = [p for p in players if p.visible and p.id in game.states]
+        round_over = game.winner is not None
         for player in visible:
             self._ease_hp(player.id, game.states[player.id].hp, dt)
-            self._draw_name_tag(image, game, player, t, scale)
-        self._draw_float_texts(image, t, scale)
+            self._draw_name_tag(image, game, player, t, scale, round_over)
+        if not round_over:
+            self._draw_float_texts(image, t, scale)
         for player in visible:
-            self._draw_card(image, game, player, t, scale)
-        self._draw_reload_warnings(image, game, visible, t, scale)
+            self._draw_card(image, game, player, t, scale, round_over)
+        if not round_over:
+            self._draw_reload_warnings(image, game, visible, t, scale)
         self._draw_banner(image, game, scale)
         if self._winner_revealed(game, t):
             self._draw_winner(image, game, t, scale)
@@ -116,7 +119,8 @@ class Hud:
             self._draw_countdown(image, game.countdown_left(t), scale)
         if game.mode == "idle":
             self._draw_waiting(image, t, scale)
-        self._draw_come_back(image, game.missing_players, t, scale)
+        if not round_over:
+            self._draw_come_back(image, game.missing_players, t, scale)
         self._draw_announcements(image, t, scale)
 
     def _waiting_sprites(self, scale: float):
@@ -171,7 +175,9 @@ class Hud:
             return np.array([nose[0], nose[1] - 0.6 * torso], np.float32)
         return None
 
-    def _draw_name_tag(self, image, game: Game, player: Player, t: float, scale: float) -> None:
+    def _draw_name_tag(
+        self, image, game: Game, player: Player, t: float, scale: float, round_over: bool
+    ) -> None:
         target = self._tag_anchor(player, scale)
         if target is None:
             return
@@ -197,7 +203,7 @@ class Hud:
             fill_x = bar_x + max(bar_h, int(bar_w * fraction))
             rounded_rect(image, bar_x, bar_y, fill_x, bar_y + bar_h, bar_h // 2, hp_color(fraction))
 
-        badges = player_badges(game, player.id)
+        badges = [] if round_over else player_badges(game, player.id)
         if badges:
             badge = self.text.get("  ".join(badges), int(22 * scale), CREAM, HUD_FONT, stroke=2)
             blit_center(image, badge, cx, bar_y + bar_h + 16 * scale)
@@ -256,7 +262,7 @@ class Hud:
             rise = 70 * scale * age + 30 * scale
             blit_center(image, assets.scaled(sprite, pop), text.pos[0], text.pos[1] - rise, alpha)
 
-    def _draw_card(self, image, game: Game, player: Player, t: float, scale: float) -> None:
+    def _draw_card(self, image, game: Game, player: Player, t: float, scale: float, round_over: bool) -> None:
         height, width = image.shape[:2]
         state = game.states[player.id]
         color = self.colors.get(player.id, WHITE)
@@ -276,7 +282,8 @@ class Hud:
 
         self._draw_hp_bar(image, game, player.id, x0, y0, card_w, scale)
         self._draw_ammo_row(image, game, player.id, x0, y0, card_w, t, scale)
-        self._draw_status(image, game, player.id, x0 + card_w / 2, y0, t, scale)
+        if not round_over:
+            self._draw_status(image, game, player.id, x0 + card_w / 2, y0, t, scale)
 
     def _draw_hp_bar(
         self, image, game: Game, player_id: int, x0: int, y0: int, card_w: int, scale: float
@@ -313,7 +320,7 @@ class Hud:
                 )
                 blit(image, sprite, x, y0 + int(68 * scale))
                 x += sprite.width + int(10 * scale)
-        if state.ammo == 0 and int(t * 3) % 2 == 0:
+        if state.ammo == 0 and game.winner is None and int(t * 3) % 2 == 0:
             hint = self.text.get("DUCK TO RELOAD", int(20 * scale), GOLD, HUD_FONT)
             blit(image, hint, x0 + card_w - hint.width - int(12 * scale), y0 + int(68 * scale))
 
