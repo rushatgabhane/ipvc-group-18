@@ -67,10 +67,10 @@ class GameConfig:
     body_damage: int = 10
     head_damage: int = 25
     bullet_travel_s: float = 0.45
-    hand_reach: float = 0.03
-    gun_reach: float = 0.22
-    rocket_reach: float = 0.3
-    grenade_reach: float = 0.06
+    hand_reach: float = 0.06
+    gun_reach: float = 0.33
+    rocket_reach: float = 0.38
+    grenade_reach: float = 0.1
     round_end_s: float = 4.0
     countdown_s: float = 3.0
     powerup_interval_s: float = 15.0
