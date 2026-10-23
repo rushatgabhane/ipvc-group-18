@@ -9,15 +9,12 @@ SOUND_FILES = (
     "rocket_launch",
     "grenade_throw",
     "explosion",
-    "hit",
     "reload",
     "dry_fire",
     "countdown",
 )
 MUZZLE_SOUNDS = {"": "gunshot", "rocket": "rocket_launch", "grenade": "grenade_throw"}
 EFFECT_SOUNDS = {
-    "hit": "hit",
-    "headshot": "hit",
     "explosion": "explosion",
     "reload": "reload",
     "dry_fire": "dry_fire",

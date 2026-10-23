@@ -199,7 +199,7 @@ highnoon/
     palette.py         shared colours
     assets.py          sprites (cached blend weights), procedural scenery, cached TrueType text
     fx.py              particles, floating numbers, queued announcements, screen shake
-    sound.py           plays the recorded sound effects (gunshot, rocket, grenade, explosion, hit, reload, empty click, 3-2-1)
+    sound.py           plays the recorded sound effects (gunshot, rocket, grenade, explosion, reload, empty click, 3-2-1)
     display.py         pyglet (OpenGL) window; screen shake is applied on the GPU
   game/
     actions.py         fire / duck / reload state machines (T4)
