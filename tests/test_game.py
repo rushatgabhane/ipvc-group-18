@@ -232,3 +232,25 @@ def test_short_detection_loss_does_not_cancel_the_duel():
 def test_three_headshots_do_not_kill():
     game, _ = start_duel()
     assert 3 * game.cfg.head_damage < game.cfg.max_hp
+
+
+def test_camping_drains_health_after_grace_period():
+    game, t = start_duel()
+    cfg = game.cfg
+    t = step(game, p1_ducked, int(cfg.camp_grace_s / DT) - 3, t)
+    assert game.states[1].hp == cfg.max_hp
+    t = step(game, p1_ducked, int(3.2 / DT), t)
+    drain = round(cfg.max_hp * cfg.camp_drain_fraction)
+    assert game.states[1].hp == cfg.max_hp - 4 * drain
+    assert any(e.kind == "camping" for e in game.effects)
+    t = step(game, duel, 3, t)
+    hp_after_standing = game.states[1].hp
+    step(game, p1_ducked, int(2 / DT), t)
+    assert game.states[1].hp == hp_after_standing
+
+
+def test_camping_to_zero_hands_the_round_to_the_opponent():
+    game, t = start_duel()
+    game.states[1].hp = 5
+    step(game, p1_ducked, int((game.cfg.camp_grace_s + 0.2) / DT), t)
+    assert game.states[1].hp == 0 and game.winner == 2

@@ -138,8 +138,24 @@ class Game:
         state.frame = state.actions.update(player.signals if player.visible else None, t, self.height)
         if state.frame.reload:
             state.ammo = self.cfg.max_ammo
+        self._drain_if_camping(player.id, state, t)
         if state.frame.shot is not None and self.round_live:
             self._fire(player.id, state, state.frame.shot, t)
+
+    def _drain_if_camping(self, player_id: int, state: PlayerState, t: float) -> None:
+        camping = state.frame.ducked and state.frame.ducked_for >= self.cfg.camp_grace_s
+        opponent = self._opponent_of(player_id)
+        if not (camping and self.round_live and opponent is not None):
+            state.next_camp_drain_t = None
+            return
+        if state.next_camp_drain_t is None:
+            state.next_camp_drain_t = t
+        if t >= state.next_camp_drain_t:
+            state.next_camp_drain_t += self.cfg.camp_drain_interval_s
+            drain = max(1, round(self.cfg.max_hp * self.cfg.camp_drain_fraction))
+            box = self._hitboxes.get(player_id)
+            pos = box.head_center.copy() if box else np.array([self.width / 2, self.wall_top], np.float32)
+            self._damage(opponent.id, player_id, drain, "camping", pos, t)
 
     def _opponent_of(self, player_id: int) -> Player | None:
         return next((p for p in self._players.values() if p.id != player_id and p.id in self._hitboxes), None)

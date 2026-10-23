@@ -57,6 +57,10 @@ class GameConfig:
     duck_margin: float = 0.03
     max_ammo: int = 3
     reload_s: float = 0.8
+    camp_grace_s: float = 5.0
+    camp_drain_fraction: float = 0.05
+    camp_drain_interval_s: float = 1.0
+    camp_warning_s: float = 3.0
     max_hp: int = 100
     body_damage: int = 10
     head_damage: int = 25

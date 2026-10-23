@@ -27,6 +27,7 @@ class PlayerState:
     last_hit_t: float = -math.inf
     rockets: int = 0
     grenades: int = 0
+    next_camp_drain_t: float | None = None
 
 
 @dataclass

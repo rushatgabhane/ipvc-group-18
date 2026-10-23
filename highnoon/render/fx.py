@@ -11,11 +11,14 @@ MAX_STEP_S = 0.05
 SHAKE_S = 0.3
 UP = -np.pi / 2
 GRENADE_SCALE = 1.4
-HEADSHOT = ("HEADSHOT!", (60, 60, 240), 84)
 BOOM = ("BOOM!", (40, 150, 255), 120)
 GRENADE_BOOM = ("BOOM!", (40, 150, 255), int(120 * GRENADE_SCALE))
 GRENADE_WARNING = ("GRENADE! DUCK!", (60, 60, 240), 84)
 PICKUP_SIZE = 72
+
+
+def headshot_announcement(color) -> tuple[str, tuple[int, int, int], int]:
+    return "HEADSHOT!", color, 84
 
 
 def pickup_announcement(player_id: int, kind: str, color) -> tuple[str, tuple[int, int, int], int]:
@@ -121,6 +124,7 @@ class FX:
             "grenade": self._grenade_thrown,
             "safe": self._safe,
             "pickup": self._pickup,
+            "camping": self._camping,
         }
 
     def update(self, t: float, effects) -> None:
@@ -166,7 +170,8 @@ class FX:
         self._float_text(f"-{effect.amount}", effect, t, (80, 80, 255), 56 if headshot else 44)
         self._shake(t, 14.0 if headshot else 8.0)
         if headshot:
-            self._announce(HEADSHOT, t, duration=1.1)
+            shooter_color = self.player_colors.get(effect.player, (60, 60, 240))
+            self._announce(headshot_announcement(shooter_color), t, duration=1.1)
 
     def _blocked(self, effect, t: float) -> None:
         burst = self.particles.burst
@@ -195,6 +200,10 @@ class FX:
 
     def _safe(self, effect, t: float) -> None:
         self._float_text("SAFE!", effect, t, (140, 240, 160), 52)
+
+    def _camping(self, effect, t: float) -> None:
+        self.particles.burst(effect.pos, 10, (60, 60, 235), (60, 200), (0.2, 0.5), (2, 4), gravity=False)
+        self._float_text(f"-{effect.amount}", effect, t, (60, 140, 255), 40)
 
     def _pickup(self, effect, t: float) -> None:
         player_color = self.player_colors.get(effect.player, (255, 255, 255))

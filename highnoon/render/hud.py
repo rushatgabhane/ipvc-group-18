@@ -25,6 +25,7 @@ BANNERS = {
 }
 RELOAD_WARNING = "DUCK TO RELOAD!"
 RELOAD_WARNING_SIZE = 40
+GET_UP_WARNING = "GET UP!"
 COUNTDOWN_SIZE = 220
 COUNTDOWN_COLOR = GOLD
 
@@ -40,9 +41,10 @@ class Hud:
 
     def prewarm(self, height: int) -> None:
         scale = height / 720.0
-        announcements = [effects.HEADSHOT, effects.BOOM, effects.GRENADE_BOOM, effects.GRENADE_WARNING]
+        announcements = [effects.BOOM, effects.GRENADE_BOOM, effects.GRENADE_WARNING]
         for player_id in self.colors:
             color = self.colors[player_id]
+            announcements.append(effects.headshot_announcement(color))
             announcements += [
                 effects.pickup_announcement(player_id, kind, color) for kind in assets.POWERUP_LABELS
             ]
@@ -52,6 +54,7 @@ class Hud:
         for label, color in (("DUCK!", RED), ("SAFE", SAFE_GREEN)):
             self.text.get(label, int(46 * scale), color, TITLE_FONT, stroke=3)
         self._reload_warning_sprite(scale)
+        self._get_up_sprite(scale)
         self.text.get("RELOADING", int(26 * scale), GOLD, HUD_FONT, stroke=2)
         for mode in BANNERS:
             self._banner_sprites(mode, scale)
@@ -164,6 +167,18 @@ class Hud:
             self._draw_reload_bar(image, cx, below_tag, state.frame.reload_progress, scale)
         elif needs_reload(game, player.id):
             self._draw_reload_warning(image, cx, below_tag, t, scale)
+        if game.mode == "duel" and state.frame.ducked and state.frame.ducked_for >= game.cfg.camp_warning_s:
+            self._draw_get_up_warning(image, cx, below_tag + 44 * scale, t, scale)
+
+    def _get_up_sprite(self, scale: float):
+        return self.text.get(
+            GET_UP_WARNING, int(RELOAD_WARNING_SIZE * scale), RED, TITLE_FONT, stroke=3, shadow=3
+        )
+
+    def _draw_get_up_warning(self, image, x: float, y: float, t: float, scale: float) -> None:
+        pulse = 1.0 + 0.15 * abs(math.sin(t * 10))
+        alpha = 1.0 if int(t * 6) % 2 == 0 else 0.5
+        blit_center(image, assets.scaled(self._get_up_sprite(scale), pulse), x, y, alpha)
 
     def _draw_reload_bar(self, image, x: float, y: float, progress: float, scale: float) -> None:
         label = self.text.get("RELOADING", int(26 * scale), GOLD, HUD_FONT, stroke=2)

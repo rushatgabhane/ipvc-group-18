@@ -23,6 +23,7 @@ class ActionFrame:
     shot: Shot | None = None
     reload: bool = False
     reload_progress: float = 0.0
+    ducked_for: float = 0.0
     head_pos: float = 0.0
     hand_closed: bool | None = None
 
@@ -60,6 +61,7 @@ class PlayerActions:
             shot=shot,
             reload=reload,
             reload_progress=reload_progress,
+            ducked_for=t - self._ducked_since if self._ducked_since is not None else 0.0,
             head_pos=head_pos,
             hand_closed=self._hand_closed,
         )
