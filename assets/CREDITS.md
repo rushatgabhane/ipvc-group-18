@@ -5,10 +5,11 @@
 | `fonts/Rye-Regular.ttf` | Google Fonts | Nicole Fally | SIL OFL 1.1 (`fonts/OFL-Rye.txt`) |
 | `fonts/BebasNeue-Regular.ttf` | Google Fonts | Dharma Type | SIL OFL 1.1 (`fonts/OFL-BebasNeue.txt`) |
 | `sprites/revolver.png` | [Revolver Icons Pack](https://opengameart.org/content/revolver-icons-pack) (`silver.png`) | YuriNikolai | CC0 1.0 |
-| `sounds/gunshot.wav` | [Gunshots](https://opengameart.org/content/gunshots) (`Black Powder.wav`, first shot, trimmed to 0.6 s, mono 44.1 kHz) | kurt | CC0 1.0 |
+| `sounds/gunshot.wav` | [The Free Firearm Sound Library](https://opengameart.org/content/the-free-firearm-sound-library) (Smith & Wesson 642 .38 Special revolver, near, `V_27P.wav`, trimmed to 1.6 s) | Free Firearm SFX Library team | CC0 1.0 |
+| `sounds/rocket_launch.wav` | [The Free Firearm Sound Library](https://opengameart.org/content/the-free-firearm-sound-library) (Winchester Model 12 shotgun, near, `K_22P.wav`, trimmed) | Free Firearm SFX Library team | CC0 1.0 |
+| `sounds/explosion.wav` | [Explosion-LS100155.ogg](https://commons.wikimedia.org/wiki/File:Explosion-LS100155.ogg) (recorded at the Toshogu Spring Festival, Nikko) | Fg2, Wikimedia Commons | Public domain |
+| `sounds/hit.wav`, `dry_fire.wav` | [Impact Sounds](https://kenney.nl/assets/impact-sounds) (`impactPunch_heavy_000`, `impactMetal_light_000`) | Kenney | CC0 1.0 |
+| `sounds/reload.wav` | [Gun Reload Sound Effects](https://opengameart.org/content/gun-reload-sound-effects) (`singlebullet1` + `clipload1`) | Brian MacIntosh (BMacZero) | CC0 1.0 |
+| `sounds/countdown.wav` | [Gun Reload Sound Effects](https://opengameart.org/content/gun-reload-sound-effects) (`clipload2`) | Brian MacIntosh (BMacZero) | CC0 1.0 |
 
-| `sounds/hit.wav`, `headshot.wav`, `blocked.wav`, `dry_fire.wav`, `safe.wav`, `camping.wav`, `beep.wav`, `go.wav`, `win.wav` | [Impact Sounds](https://kenney.nl/assets/impact-sounds) (punch, soft, wood, metal and bell impacts; mixed and trimmed) | Kenney | CC0 1.0 |
-| `sounds/reload.wav`, `pickup.wav` | [Gun Reload Sound Effects](https://opengameart.org/content/gun-reload-sound-effects) (`singlebullet1` + `clipload1`, `clipload2`) | Brian MacIntosh (BMacZero) | CC0 1.0 |
-| `sounds/explosion.wav` | [Dynamite sound effect](https://opengameart.org/content/dynamite-sound-effect) (blast only, trimmed to 1.35 s) | Listener | CC0 1.0 |
-
-The rocket whoosh and grenade swish are synthesised in `highnoon/render/sound.py`.
+`sounds/grenade_throw.wav` is a band-passed noise swoosh generated for this project.
