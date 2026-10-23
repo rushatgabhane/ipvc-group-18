@@ -5,6 +5,8 @@ import time
 from highnoon.config import Config
 from highnoon.core.capture import open_source
 from highnoon.core.profiler import Profiler
+from highnoon.core.recorder import SessionRecorder
+from highnoon.core.signal_log import SignalLog
 from highnoon.game.game import Game
 from highnoon.render.display import Display
 from highnoon.render.renderer import Renderer
@@ -24,6 +26,10 @@ def run(cfg: Config) -> Profiler:
     renderer = Renderer(cfg.display)
     game = Game(cfg.game, (cfg.capture.width, cfg.capture.height))
     display = open_display(cfg)
+    signal_log = SignalLog(cfg.signals_csv) if cfg.signals_csv else None
+    recorder = (
+        SessionRecorder(cfg.record_video, cfg.capture.fps, cfg.capture.mirror) if cfg.record_video else None
+    )
 
     source.start()
     worker.start()
@@ -47,6 +53,10 @@ def run(cfg: Config) -> Profiler:
             with profiler.stage("game"):
                 game.width, game.height = frame.size
                 game.update(players, frame.t_capture, tracker.reassigned)
+            if recorder is not None:
+                recorder.add(frame.image)
+            if signal_log is not None:
+                signal_log.record(frame.id, frame.t_capture, players, game, len(perception.hands))
             with profiler.stage("render"):
                 output = renderer.render(perception, players, game, profiler)
 
@@ -64,6 +74,11 @@ def run(cfg: Config) -> Profiler:
         worker.stop()
         source.stop()
         profiler.close()
+        if signal_log is not None:
+            signal_log.close()
+        if recorder is not None:
+            recorder.close()
+            print(f"recorded {recorder.path} ({recorder.dropped} frames dropped)")
         if display is not None:
             display.close()
     return profiler

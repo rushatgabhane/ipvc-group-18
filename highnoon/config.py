@@ -100,4 +100,6 @@ class Config:
     game: GameConfig = field(default_factory=GameConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
     metrics_csv: Path | None = None
+    signals_csv: Path | None = None
+    record_video: Path | None = None
     max_frames: int | None = None

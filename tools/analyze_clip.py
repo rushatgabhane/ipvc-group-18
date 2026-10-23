@@ -7,37 +7,18 @@ from collections import Counter
 from pathlib import Path
 
 import cv2
-import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from highnoon.config import Config
 from highnoon.core.capture import open_source
 from highnoon.core.profiler import Profiler
+from highnoon.core.signal_log import COLUMNS, EVENT_LABELS, signal_row
 from highnoon.game.game import Game
 from highnoon.render.renderer import Renderer
 from highnoon.tracking.identity import IdentityTracker
 from highnoon.vision.motion import MotionFilter
 from highnoon.vision.perception import Perceiver
-
-COLUMNS = [
-    "frame",
-    "t",
-    "player",
-    "visible",
-    "extension",
-    "elevation_deg",
-    "aim_valid",
-    "aiming",
-    "head_pos",
-    "ducked",
-    "hand_openness",
-    "hand_closed",
-    "ammo",
-    "hp",
-    "event",
-]
-EVENT_LABELS = {"muzzle": "SHOT"}
 
 
 def main() -> None:
@@ -97,7 +78,9 @@ def main() -> None:
             if state.frame.ducked != was_ducked.get(player.id, False):
                 log(player.id, "DUCK" if state.frame.ducked else "STAND")
                 was_ducked[player.id] = state.frame.ducked
-            writer.writerow(signal_row(frame.id, t, player, state, events.get(player.id, [])))
+            writer.writerow(
+                signal_row(frame.id, t, player, state, events.get(player.id, []), len(perception.hands))
+            )
 
         if not args.no_video:
             output = renderer.render(perception, players, game, profiler)
@@ -126,28 +109,6 @@ class EventLog:
     def __call__(self, player_id: int, label: str) -> None:
         self.events.setdefault(player_id, []).append(label)
         self.timeline.append((self.t, f"P{player_id} {label}"))
-
-
-def signal_row(frame_id: int, t: float, player, state, events: list[str]) -> list:
-    signals = player.signals
-    hand = signals.hand_openness if signals else None
-    return [
-        frame_id,
-        f"{t:.3f}",
-        player.id,
-        int(player.visible),
-        f"{signals.extension:.3f}" if signals else "",
-        f"{np.degrees(signals.elevation):.1f}" if signals else "",
-        int(signals.aim_valid) if signals else "",
-        int(state.frame.aiming),
-        f"{state.frame.head_pos:.3f}",
-        int(state.frame.ducked),
-        f"{hand:.3f}" if hand is not None else "",
-        "" if state.frame.hand_closed is None else int(state.frame.hand_closed),
-        state.ammo,
-        state.hp,
-        " ".join(events),
-    ]
 
 
 def print_timeline(clip: Path, timeline: list[tuple[float, str]]) -> None:

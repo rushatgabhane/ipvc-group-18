@@ -132,6 +132,17 @@ Windows compare `--delegate gpu` with `--delegate cpu` using `--headless --fast`
 .venv/bin/python -m highnoon --source clips/crossing.mp4 --headless --fast   # max throughput
 ```
 
+To debug controls from a real session, record it and log every signal, then replay the video
+through `tools/analyze_clip.py` after changing thresholds:
+
+```bash
+.venv/bin/python -m highnoon --record clips/session.mp4 --signals-csv results/session_signals.csv
+.venv/bin/python tools/analyze_clip.py clips/session.mp4
+```
+
+The signals CSV has one row per player per frame: hand tracked, hand openness, fist/open, aim,
+ducked, ammo, HP, and events such as `SHOT`, `DRY_FIRE` or `FIST IGNORED (cooldown)`.
+
 `--metrics-csv` writes one row per frame with every stage's time, FPS and capture-to-screen
 latency, ready for the plots in the report. `docs/PERFORMANCE.md` records all measurements so
 far and the decisions taken from them.
