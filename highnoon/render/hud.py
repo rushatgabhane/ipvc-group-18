@@ -28,6 +28,7 @@ RELOAD_WARNING_SIZE = 40
 GET_UP_WARNING = "GET UP!"
 CAMPER_WARNING = "GET OUT CAMPER!"
 COUNTDOWN_SIZE = 220
+WAITING_LINES = (("TWO PLAYERS", 110), ("STEP INTO VIEW", 80))
 COUNTDOWN_COLOR = GOLD
 
 
@@ -58,6 +59,7 @@ class Hud:
         for warning in (GET_UP_WARNING, CAMPER_WARNING):
             self._camping_sprite(warning, scale)
         self.text.get("RELOADING", int(26 * scale), GOLD, HUD_FONT, stroke=2)
+        self._waiting_sprites(scale)
         for mode in BANNERS:
             self._banner_sprites(mode, scale)
         for number in range(1, 4):
@@ -103,7 +105,22 @@ class Hud:
             self._draw_winner(image, game, t, scale)
         if game.mode == "countdown":
             self._draw_countdown(image, game.countdown_left(t), scale)
+        if game.mode == "idle":
+            self._draw_waiting(image, t, scale)
         self._draw_announcements(image, t, scale)
+
+    def _waiting_sprites(self, scale: float):
+        return [
+            self._announcement_sprite(line, size, GOLD if i == 0 else CREAM, scale)
+            for i, (line, size) in enumerate(WAITING_LINES)
+        ]
+
+    def _draw_waiting(self, image, t: float, scale: float) -> None:
+        height, width = image.shape[:2]
+        pulse = 1.0 + 0.04 * math.sin(t * 3)
+        top, bottom = self._waiting_sprites(scale)
+        blit_center(image, assets.scaled(top, pulse), width / 2, height * 0.36)
+        blit_center(image, assets.scaled(bottom, pulse), width / 2, height * 0.36 + top.height * 0.9)
 
     def _draw_countdown(self, image, seconds_left: float, scale: float) -> None:
         if seconds_left <= 0:
