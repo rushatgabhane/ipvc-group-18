@@ -312,6 +312,21 @@ def rocket_sprite(length: int) -> Sprite:
     return art_sprite("rocket.png", length)
 
 
+@lru_cache(maxsize=8)
+def bullet_sprite(length: int, color: tuple[int, int, int]) -> Sprite:
+    canvas, s, _ = supersampled(length, length)
+    c, half = s // 2, int(s * 0.11)
+    tail, shoulder, tip = int(s * 0.18), int(s * 0.6), int(s * 0.86)
+    copper, shade, shine = (55, 105, 185, 255), (35, 65, 120, 255), (150, 200, 240, 255)
+    cv2.ellipse(canvas, (shoulder, c), (tip - shoulder, half), 0, -90, 90, copper, -1, cv2.LINE_AA)
+    cv2.rectangle(canvas, (tail, c - half), (shoulder, c + half), copper, -1)
+    cv2.rectangle(canvas, (tail, c + half // 3), (shoulder, c + half), shade, -1)
+    cv2.line(canvas, (tail + 2 * SUPERSAMPLE, c - half // 2), (shoulder, c - half // 2), shine, SUPERSAMPLE)
+    cv2.rectangle(canvas, (tail, c - half), (tail + 2 * SUPERSAMPLE, c + half), shade, -1)
+    sprite = downsample(canvas, length, length)
+    return Sprite.from_bgra(outlined(sprite.bgra, color))
+
+
 def desert_background(width: int, height: int, seed: int = 7) -> np.ndarray:
     rng = np.random.default_rng(seed)
     image = sky_with_sun(width, height)

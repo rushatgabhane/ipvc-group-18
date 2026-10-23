@@ -17,6 +17,11 @@ POWERUP_TRAIL = ((3, 0.46), (2, 0.64), (1, 0.82))
 ROCKET_FLAME = ((44, 22, (20, 70, 140)), (36, 13, (40, 150, 255)), (30, 7, (180, 240, 255)))
 FIREBALL = ((1.0, (20, 60, 200)), (0.75, (30, 140, 255)), (0.45, (170, 235, 255)))
 MUZZLE_RINGS = ((46, 0.25), (30, 0.5), (16, 1.0))
+BULLET_LENGTH = 0.05
+BULLET_STREAK = 0.12
+BULLET_STREAK_WIDTH = 0.004
+STREAK_COLOR = (215, 225, 230)
+STREAK_ALPHA = 0.35
 
 
 class WorldView:
@@ -86,7 +91,7 @@ class WorldView:
     def _draw_glow(self, image, game: Game, t: float, scale: float) -> None:
         muzzles = [e for e in game.effects if e.kind == "muzzle" and t - e.t < MUZZLE_FLASH_S]
         blasts = [e for e in game.effects if e.kind == "explosion" and t - e.t < EXPLOSION_S]
-        if not (game.aims or game.bullets or game.rockets or muzzles or blasts):
+        if not (game.aims or game.rockets or muzzles or blasts):
             return
         if self._glow is None or self._glow.shape != image.shape:
             self._glow = np.zeros_like(image)
@@ -95,8 +100,6 @@ class WorldView:
         for player_id, aim in game.aims.items():
             if aim.path is not None:
                 draw_arc_preview(glow, aim, self.colors.get(player_id, WHITE), t, scale)
-        for bullet in game.bullets:
-            draw_tracer(glow, bullet, self.colors.get(bullet.shooter, WHITE), t, scale)
         for rocket in game.rockets:
             draw_rocket_flame(glow, rocket, t, scale)
         for blast in blasts:
@@ -107,6 +110,8 @@ class WorldView:
 
     def _draw_projectiles(self, image, game: Game, t: float) -> None:
         height = image.shape[0]
+        for bullet in game.bullets:
+            draw_bullet(image, bullet, self.colors.get(bullet.shooter, WHITE), t, height)
         for rocket in game.rockets:
             heading = rocket.heading(t)
             angle = -math.degrees(math.atan2(heading[1], heading[0]))
@@ -197,13 +202,30 @@ def draw_arc_preview(glow, aim, color, t: float, scale: float) -> None:
         cv2.circle(glow, dot, max(2, int(3 * scale)), core, -1, cv2.LINE_AA)
 
 
-def draw_tracer(glow, bullet, color, t: float, scale: float) -> None:
+def draw_bullet(image, bullet, color, t: float, height: int) -> None:
     progress = bullet.progress(t)
-    head = point(bullet.origin + bullet.direction * bullet.length * progress)
-    tail = point(bullet.origin + bullet.direction * bullet.length * max(0.0, progress - 0.35))
-    cv2.line(glow, tail, head, scaled_color(color, 0.45), max(3, int(12 * scale)), cv2.LINE_AA)
-    cv2.line(glow, tail, head, scaled_color(color, 1.0), max(2, int(4 * scale)), cv2.LINE_AA)
-    cv2.line(glow, tail, head, (255, 255, 255), 1, cv2.LINE_AA)
+    head = bullet.origin + bullet.direction * bullet.length * progress
+    streak = bullet.origin + bullet.direction * bullet.length * max(0.0, progress - BULLET_STREAK)
+    thickness = max(1, int(BULLET_STREAK_WIDTH * height))
+    region = streak_roi(image, streak, head, thickness)
+    if region is not None:
+        roi, offset = region
+        overlay = roi.copy()
+        cv2.line(overlay, point(streak - offset), point(head - offset), STREAK_COLOR, thickness, cv2.LINE_AA)
+        cv2.addWeighted(overlay, STREAK_ALPHA, roi, 1 - STREAK_ALPHA, 0, dst=roi)
+    angle = -math.degrees(math.atan2(float(bullet.direction[1]), float(bullet.direction[0])))
+    sprite = assets.bullet_sprite(int(BULLET_LENGTH * height), tuple(color))
+    blit_center(image, assets.rotated(sprite, angle), head[0], head[1])
+
+
+def streak_roi(image, start: np.ndarray, end: np.ndarray, pad: int):
+    height, width = image.shape[:2]
+    x0, y0 = (np.minimum(start, end) - pad).astype(int)
+    x1, y1 = (np.maximum(start, end) + pad + 1).astype(int)
+    x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, width), min(y1, height)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return image[y0:y1, x0:x1], np.array([x0, y0], np.float32)
 
 
 def draw_rocket_flame(glow, rocket, t: float, scale: float) -> None:
