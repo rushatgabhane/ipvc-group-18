@@ -331,7 +331,8 @@ class Game:
                 targets += [("head", player_id), ("body", player_id)]
         if self.powerup is not None:
             center = self.powerup.center(self._t)
-            rows.append(segment_circle_hits(starts, ends, center, self.powerup.radius))
+            hit_radius = self.powerup.radius * self.cfg.powerup_hit_scale
+            rows.append(segment_circle_hits(starts, ends, center, hit_radius))
             targets.append(("powerup", self.powerup))
         return np.stack(rows), targets
 
@@ -370,7 +371,8 @@ class Game:
         radius = self.cfg.powerup_radius * self.height
         start = np.array([rng.uniform(0.3, 0.7) * self.width, self.height + radius], np.float32)
         rise_px = float(start[1] - rng.uniform(0.22, 0.4) * self.height)
-        landing_x = rng.uniform(0.2, 0.8) * self.width
+        drift = rng.uniform(-self.cfg.powerup_drift, self.cfg.powerup_drift) * self.width
+        landing_x = float(np.clip(start[0] + drift, 0.15 * self.width, 0.85 * self.width))
         velocity = np.array([(landing_x - start[0]) / (2 * rise_s), -2 * rise_px / rise_s], np.float32)
         kind = POWERUP_KINDS[int(rng.integers(len(POWERUP_KINDS)))]
         return Powerup(kind, start, velocity, 2 * rise_px / rise_s**2, radius, t, t + 2 * rise_s)

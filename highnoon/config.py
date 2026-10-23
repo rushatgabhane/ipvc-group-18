@@ -69,8 +69,10 @@ class GameConfig:
     countdown_s: float = 3.0
     player_grace_s: float = 1.0
     powerup_interval_s: float = 30.0
-    powerup_rise_s: float = 1.8
-    powerup_radius: float = 0.06
+    powerup_rise_s: float = 2.8
+    powerup_radius: float = 0.08
+    powerup_hit_scale: float = 1.3
+    powerup_drift: float = 0.12
     rocket_speed: float = 1.6
     rocket_gravity: float = 1.3
     rocket_blast_radius: float = 0.16
