@@ -53,14 +53,11 @@ class Perceiver:
         width, height = frame.size
         poses = convert_poses(pose_result, width, height)
         faces = convert_faces(face_result, width, height)
-        person_masks = [
-            np.array(m.numpy_view().squeeze(), np.float32) for m in pose_result.segmentation_masks or []
-        ]
-        mask = np.maximum.reduce(person_masks) if person_masks else None
+        mask = merge_person_masks(pose_result)
         hands, timings["hand"] = self.hands.latest()
         timings["hand_lag"] = float(frame.id - hands[0].frame_id) if hands else 0.0
         timings["postprocess"] = elapsed_ms(t_post)
-        return Perception(frame, poses, faces, mask, time.perf_counter(), timings, hands, person_masks)
+        return Perception(frame, poses, faces, mask, time.perf_counter(), timings, hands)
 
     def close(self) -> None:
         self._pose_thread.shutdown(wait=True)
@@ -251,3 +248,13 @@ def convert_hands(result, width: int, height: int, frame_id: int) -> list[HandOb
         world = np.array([(lm.x, lm.y, lm.z) for lm in world_landmarks], np.float32)
         hands.append(HandObservation(to_pixels(landmarks, width, height), hand_openness(world), frame_id))
     return hands
+
+
+def merge_person_masks(result) -> np.ndarray | None:
+    masks = result.segmentation_masks
+    if not masks:
+        return None
+    merged = masks[0].numpy_view()
+    for mask in masks[1:]:
+        merged = np.maximum(merged, mask.numpy_view())
+    return np.array(merged.squeeze(), dtype=np.float32)

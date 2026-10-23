@@ -15,7 +15,6 @@ from highnoon.render.sound import SoundBoard
 from highnoon.tracking.identity import IdentityTracker
 from highnoon.vision.motion import MotionFilter
 from highnoon.vision.perception import Perceiver, PerceptionWorker
-from highnoon.vision.spread import StageSpread
 
 KEY_HELP = "q/esc quit | r restart round | d debug overlay | b background | f fullscreen"
 
@@ -26,7 +25,6 @@ def run(cfg: Config) -> Profiler:
     worker = PerceptionWorker(source, Perceiver(cfg.perception))
     tracker = IdentityTracker(cfg.tracking, cfg.perception.max_players)
     motion = MotionFilter(cfg.filters)
-    stage = StageSpread(cfg.stage_spread)
     renderer = Renderer(cfg.display)
     game = Game(cfg.game, (cfg.capture.width, cfg.capture.height))
     display = open_display(cfg)
@@ -48,9 +46,6 @@ def run(cfg: Config) -> Profiler:
                 if worker.finished:
                     break
                 continue
-            camera_image = perception.frame.image
-            with profiler.stage("spread"):
-                perception = stage.apply(perception)
             frame = perception.frame
             record_pipeline_timings(profiler, perception, last_frame_id)
             last_frame_id = frame.id
@@ -66,7 +61,7 @@ def run(cfg: Config) -> Profiler:
                 with profiler.stage("sound"):
                     sounds.update(game, frame.t_capture)
             if recorder is not None:
-                recorder.add(camera_image)
+                recorder.add(frame.image)
             if signal_log is not None:
                 signal_log.record(frame.id, frame.t_capture, players, game, len(perception.hands))
             with profiler.stage("render"):
