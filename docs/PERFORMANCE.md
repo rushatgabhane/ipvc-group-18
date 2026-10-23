@@ -181,3 +181,20 @@ frames are dropped (logged as `dropped`) rather than delayed, so latency cannot 
 - [ ] Glass-to-glass latency (camera sensor + display) with a phone slow-motion video of a
       flashing timer. The `latency` metric only covers capture -> on screen in software.
 - [ ] The cost of real game rendering (sprites, particles) once T4/T5 add it.
+
+## 8d. Wrist crops for the hand model (tested, not adopted)
+
+Idea: the hand model's palm detector sees the whole 1280x720 frame shrunk to 192x192, so hands are
+small. Cropping a square around each wrist (from the pose) should make hands bigger and easier to
+find. Replayed `clips/hand_session.mp4` (149 s, two players) with synchronous hand detection; three
+runs in parallel, so absolute times are inflated but comparable.
+
+| Variant | Hand model time (median) | P1 tracked while aiming | P2 tracked | P1 fired | P2 fired |
+|---|---|---|---|---|---|
+| Full frame, 4 hands (current) | 40 ms | 96% | 81% | 67 | 66 |
+| Wrist crops, side 2.5x forearm | 93 ms | 93% | 89% | 66 | 74 |
+| Wrist crops, side 3.5x forearm | 93 ms | 89% | 87% | 65 | 77 |
+
+Crops track the farther player better (+8 points) but cost 2.3x the time, because every crop runs
+the palm detector again (up to 4 crops per frame, no tracking between frames). With the hand model
+already running asynchronously at 40-60 ms, doubling it would double the hand lag. Kept full frame.

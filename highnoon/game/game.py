@@ -146,12 +146,19 @@ class Game:
             return
         state.frame = state.actions.update(player.signals if player.visible else None, t, self.height)
         if state.frame.reload:
-            state.ammo = self.cfg.max_ammo
+            self._reload(player.id, state, t)
         self._drain_if_camping(player.id, state, t)
         if state.frame.ignored_fist is not None:
             state.last_ignored_fist = (state.frame.ignored_fist, t)
         if state.frame.shot is not None and self.round_live:
             self._fire(player.id, state, state.frame.shot, t)
+
+    def _reload(self, player_id: int, state: PlayerState, t: float) -> None:
+        if state.ammo < self.cfg.max_ammo and self.round_live:
+            box = self._hitboxes.get(player_id)
+            pos = box.head_center.copy() if box else np.array([self.width / 2, self.wall_top], np.float32)
+            self.effects.append(Effect("reload", pos, t, player_id))
+        state.ammo = self.cfg.max_ammo
 
     def _drain_if_camping(self, player_id: int, state: PlayerState, t: float) -> None:
         camping = state.frame.ducked and state.frame.ducked_for >= self.cfg.camp_grace_s
@@ -166,18 +173,21 @@ class Game:
             drain = max(1, round(self.cfg.max_hp * self.cfg.camp_drain_fraction))
             box = self._hitboxes.get(player_id)
             pos = box.head_center.copy() if box else np.array([self.width / 2, self.wall_top], np.float32)
-            self._damage(opponent.id, player_id, drain, "camping", pos, t)
+            self._damage(opponent.id, player_id, drain, "camping", pos, t, "camping")
 
     def _opponent_of(self, player_id: int) -> Player | None:
         return next((p for p in self._players.values() if p.id != player_id and p.id in self._hitboxes), None)
 
     def _fire(self, shooter: int, state: PlayerState, shot: Shot, t: float) -> None:
         opponent = self._opponent_of(shooter)
+        weapon = ""
         if state.grenades > 0 and opponent is not None:
             state.grenades -= 1
+            weapon = "grenade"
             self._throw_grenade(shooter, opponent, shot.origin, t)
         elif state.rockets > 0:
             state.rockets -= 1
+            weapon = "rocket"
             velocity, gravity = self._rocket_launch(shot.direction)
             self.rockets.append(Rocket(shooter, shot.origin, velocity, gravity, t, shot.origin.copy()))
         elif state.ammo > 0:
@@ -189,7 +199,7 @@ class Game:
             self.effects.append(Effect("dry_fire", shot.origin, t, shooter))
             state.last_ignored_fist = ("no ammo", t)
             return
-        self.effects.append(Effect("muzzle", shot.origin, t, shooter))
+        self.effects.append(Effect("muzzle", shot.origin, t, shooter, detail=weapon))
 
     def _resolve_bullets(self, t: float) -> None:
         in_flight = []
@@ -201,9 +211,8 @@ class Game:
             impact = bullet.origin + bullet.direction * distance
             if kind in ("head", "body") and self.round_live:
                 damage = self.cfg.head_damage if kind == "head" else self.cfg.body_damage
-                self._damage(
-                    bullet.shooter, target, damage, "headshot" if kind == "head" else "hit", impact, t
-                )
+                effect = "headshot" if kind == "head" else "hit"
+                self._damage(bullet.shooter, target, damage, effect, impact, t, "bullet")
             elif kind == "cover":
                 self.effects.append(Effect("blocked", impact, t, bullet.shooter))
             elif kind == "powerup":
@@ -279,7 +288,7 @@ class Game:
         if state.frame.ducked:
             self.effects.append(Effect("safe", grenade.pos.copy(), t, grenade.thrower))
         else:
-            self._damage(grenade.thrower, grenade.target, state.hp, "hit", grenade.pos.copy(), t)
+            self._damage(grenade.thrower, grenade.target, state.hp, "hit", grenade.pos.copy(), t, "grenade")
 
     def _explode(self, shooter: int, center: np.ndarray, t: float) -> None:
         self.effects.append(Effect("explosion", center, t, shooter))
@@ -291,13 +300,15 @@ class Game:
             if distance <= radius:
                 falloff = (self.cfg.rocket_damage - self.cfg.rocket_min_damage) * distance / radius
                 damage = round(self.cfg.rocket_damage - falloff)
-                self._damage(shooter, player_id, damage, "hit", box.torso.mean(axis=0), t)
+                self._damage(shooter, player_id, damage, "hit", box.torso.mean(axis=0), t, "rocket")
 
-    def _damage(self, shooter: int, target: int, amount: int, effect: str, pos: np.ndarray, t: float) -> None:
+    def _damage(
+        self, shooter: int, target: int, amount: int, effect: str, pos: np.ndarray, t: float, source: str
+    ) -> None:
         state = self.states[target]
         state.hp = max(0, state.hp - amount)
         state.last_hit_t = t
-        self.effects.append(Effect(effect, pos, t, shooter, amount))
+        self.effects.append(Effect(effect, pos, t, shooter, amount, detail=source))
         if state.hp == 0:
             self.winner = shooter
             self.round_over_t = t

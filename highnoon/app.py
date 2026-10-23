@@ -4,12 +4,14 @@ import time
 
 from highnoon.config import Config
 from highnoon.core.capture import open_source
+from highnoon.core.match_log import MatchLog
 from highnoon.core.profiler import Profiler
 from highnoon.core.recorder import SessionRecorder
 from highnoon.core.signal_log import SignalLog
 from highnoon.game.game import Game
 from highnoon.render.display import Display
 from highnoon.render.renderer import Renderer
+from highnoon.render.sound import SoundBoard
 from highnoon.tracking.identity import IdentityTracker
 from highnoon.vision.motion import MotionFilter
 from highnoon.vision.perception import Perceiver, PerceptionWorker
@@ -26,7 +28,9 @@ def run(cfg: Config) -> Profiler:
     renderer = Renderer(cfg.display)
     game = Game(cfg.game, (cfg.capture.width, cfg.capture.height))
     display = open_display(cfg)
+    sounds = SoundBoard() if display is not None and cfg.display.sound else None
     signal_log = SignalLog(cfg.signals_csv) if cfg.signals_csv else None
+    match_log = MatchLog(cfg.games_csv) if cfg.games_csv else None
     recorder = (
         SessionRecorder(cfg.record_video, cfg.capture.fps, cfg.capture.mirror) if cfg.record_video else None
     )
@@ -53,6 +57,9 @@ def run(cfg: Config) -> Profiler:
             with profiler.stage("game"):
                 game.width, game.height = frame.size
                 game.update(players, frame.t_capture, tracker.reassigned)
+            if sounds is not None:
+                with profiler.stage("sound"):
+                    sounds.update(game, frame.t_capture)
             if recorder is not None:
                 recorder.add(frame.image)
             if signal_log is not None:
@@ -67,6 +74,8 @@ def run(cfg: Config) -> Profiler:
                     break
 
             profiler.end_frame(frame.id, frame.t_capture)
+            if match_log is not None:
+                match_log.update(game, players, frame.t_capture, profiler.last_frame)
             frames_shown += 1
             if cfg.max_frames is not None and frames_shown >= cfg.max_frames:
                 break
@@ -76,6 +85,9 @@ def run(cfg: Config) -> Profiler:
         profiler.close()
         if signal_log is not None:
             signal_log.close()
+        if match_log is not None:
+            match_log.close()
+            print(f"{match_log.rounds} games appended to {match_log.path}")
         if recorder is not None:
             recorder.close()
             print(f"recorded {recorder.path} ({recorder.dropped} frames dropped)")

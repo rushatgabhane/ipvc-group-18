@@ -17,7 +17,7 @@ POWERUP_TRAIL = ((3, 0.46), (2, 0.64), (1, 0.82))
 ROCKET_FLAME = ((44, 22, (20, 70, 140)), (36, 13, (40, 150, 255)), (30, 7, (180, 240, 255)))
 FIREBALL = ((1.0, (20, 60, 200)), (0.75, (30, 140, 255)), (0.45, (170, 235, 255)))
 MUZZLE_RINGS = ((46, 0.25), (30, 0.5), (16, 1.0))
-AIM_DOTS = 6
+AIM_DOTS = 3
 AIM_DOT_GAP = 22
 AIM_DOT_START = 18
 
@@ -182,8 +182,7 @@ def draw_crosshair(
 
 
 def draw_laser(glow, aim, color, t: float, scale: float) -> None:
-    brightness = 1.0 if aim.on_target else 0.85
-    halo, core = scaled_color(color, 0.4 * brightness), scaled_color(color, brightness)
+    halo, core = scaled_color(color, 0.35), scaled_color(color, 0.9)
     steps = (AIM_DOT_START + AIM_DOT_GAP * np.arange(AIM_DOTS)) * scale
     reach = float(np.linalg.norm(aim.end - aim.origin))
     dots = aim.origin + np.outer(steps[steps < reach], unit(aim.end - aim.origin))

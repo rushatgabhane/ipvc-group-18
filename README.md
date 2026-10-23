@@ -79,7 +79,7 @@ python3.12 -m venv .venv
 ```
 
 Keys: `q`/`esc` quit, `r` restart round, `d` debug overlay (skeleton, signal values, timings;
-off by default), `b` toggle background, `f` fullscreen.
+off by default), `b` toggle background, `f` fullscreen. Sound effects are on; `--mute` turns them off.
 
 ## How to play
 
@@ -87,8 +87,8 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 
 | Action | Movement |
 |---|---|
-| **Aim** | Point with your arm (straight, or just the forearm when sitting close). A laser sight follows it, and the dot turns red on a target |
-| **Shoot** | Aim with an **open hand**, then **close it into a fist**. Hold the hand open again briefly before the next shot (at most one shot every 0.6 s). Shots fired quickly after each other kick: each one adds spread, shown as a ring around the reticle, and it recovers within about 1 s |
+| **Aim** | Point with your arm (straight, or just the forearm when sitting close). Three dots in front of your hand show the angle |
+| **Shoot** | Aim with an **open hand**, then **close it into a fist**. Hold the hand open again briefly before the next shot (at most one shot every 0.6 s). Shots fired quickly after each other kick: each one adds random spread, which recovers within about 1 s |
 | **Duck** | Get your head below the top of the wall (the bottom 25% of the screen). You are safe there but cannot shoot |
 | **Reload** | Stay ducked for 0.8 s to refill the magazine (3 bullets). A bar under your name shows the progress |
 | **No camping** | After 7 s ducked you lose 5 HP every second until you stand up ("GET UP!" warns you from 5 s, then "GET OUT CAMPER!" while you are losing HP) |
@@ -143,6 +143,13 @@ through `tools/analyze_clip.py` after changing thresholds:
 The signals CSV has one row per player per frame: hand tracked, hand openness, fist/open, aim,
 ducked, ammo, HP, and events such as `SHOT`, `DRY_FIRE` or `FIST IGNORED (cooldown)`.
 
+**Evaluation numbers are saved after every game.** Each finished round (KO, a player leaving, or
+quitting mid-round) appends one row to `results/games.csv` (change with `--games-csv`, disable with
+`--no-games-csv`). A row has the result, duration, FPS, mean/p95 latency, inference, hand-model time,
+hand lag and render time, and per player: shots, bullet hits, headshots, accuracy, rockets, grenades,
+damage dealt, powerups, reloads, dry fires, ducks, time ducked and aiming, % of aiming time the hand
+was tracked, fists detected, % of fists that fired, and why the other fists were ignored.
+
 `--metrics-csv` writes one row per frame with every stage's time, FPS and capture-to-screen
 latency, ready for the plots in the report. `docs/PERFORMANCE.md` records all measurements so
 far and the decisions taken from them.
@@ -177,6 +184,7 @@ highnoon/
     capture.py         threaded camera / video file sources
     filters.py         vectorised One Euro filter
     profiler.py        per-stage timing, FPS, latency, CSV export
+    match_log.py       per-game evaluation stats appended to results/games.csv
   vision/
     perception.py      MediaPipe pose + face inference, parallel (T1/T2)
     motion.py          per-player keypoint smoothing + control signals (T2)
@@ -184,11 +192,12 @@ highnoon/
     identity.py        persistent player ids, face-to-player assignment (T3)
   render/
     renderer.py        background compositing, wall, layer order, debug overlay (T5)
-    world.py           lasers, rocket arc preview, tracers, powerups, rockets, grenades, explosions
+    world.py           aim dots, rocket arc preview, tracers, powerups, rockets, grenades, explosions
     hud.py             name tags, HUD cards, banner, winner screen, announcements
     palette.py         shared colours
     assets.py          sprites (cached blend weights), procedural scenery, cached TrueType text
-    fx.py              particles, floating numbers, announcements, screen shake
+    fx.py              particles, floating numbers, queued announcements, screen shake
+    sound.py           sound effects synthesised with numpy, played through pyglet
     display.py         pyglet (OpenGL) window; screen shake is applied on the GPU
   game/
     actions.py         fire / duck / reload state machines (T4)

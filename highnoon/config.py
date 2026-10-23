@@ -90,6 +90,7 @@ class DisplayConfig:
     vsync: bool = False
     window_name: str = "HIGH NOON"
     show_debug: bool = False
+    sound: bool = True
     background: bool = True
 
 
@@ -103,5 +104,6 @@ class Config:
     display: DisplayConfig = field(default_factory=DisplayConfig)
     metrics_csv: Path | None = None
     signals_csv: Path | None = None
+    games_csv: Path | None = Path("results/games.csv")
     record_video: Path | None = None
     max_frames: int | None = None

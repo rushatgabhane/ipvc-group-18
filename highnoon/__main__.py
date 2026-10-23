@@ -22,9 +22,14 @@ def parse_args() -> Config:
         help="inference device; auto = GPU on Windows/Linux when it works, else CPU",
     )
     parser.add_argument("--headless", action="store_true", help="no window")
+    parser.add_argument("--mute", action="store_true", help="no sound effects")
     parser.add_argument("--vsync", action="store_true", help="sync to display refresh (adds latency)")
     parser.add_argument("--metrics-csv", type=Path, help="write per-frame timings to this CSV")
     parser.add_argument("--signals-csv", type=Path, help="write per-frame hand/aim/duck signals per player")
+    parser.add_argument(
+        "--games-csv", type=Path, default=Path("results/games.csv"), help="append per-game eval stats here"
+    )
+    parser.add_argument("--no-games-csv", action="store_true", help="do not log per-game stats")
     parser.add_argument("--record", type=Path, help="save the raw camera video of the session (for replay)")
     parser.add_argument("--max-frames", type=int, help="stop after N frames")
     args = parser.parse_args()
@@ -38,8 +43,10 @@ def parse_args() -> Config:
     cfg.perception.delegate = args.delegate
     cfg.display.enabled = not args.headless
     cfg.display.vsync = args.vsync
+    cfg.display.sound = not args.mute
     cfg.metrics_csv = args.metrics_csv
     cfg.signals_csv = args.signals_csv
+    cfg.games_csv = None if args.no_games_csv else args.games_csv
     cfg.record_video = args.record
     cfg.max_frames = args.max_frames
     return cfg

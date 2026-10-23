@@ -16,6 +16,7 @@ class Profiler:
         self.window = window
         self._samples: dict[str, deque[float]] = {}
         self._frame: dict[str, float] = {}
+        self.last_frame: dict[str, float] = {}
         self._frame_times: deque[float] = deque(maxlen=window)
         self._csv_path = csv_path
         self._csv_file = None
@@ -41,7 +42,7 @@ class Profiler:
             self._samples.setdefault(name, deque(maxlen=self.window)).append(value)
         if self._csv_path is not None:
             self._write_csv_row(frame_id, now)
-        self._frame = {}
+        self.last_frame, self._frame = self._frame, {}
 
     def fps(self) -> float:
         if len(self._frame_times) < 2:
