@@ -45,8 +45,7 @@ class WorldView:
         for player_id, aim in game.aims.items():
             color = self.colors.get(player_id, WHITE)
             draw_weapon(image, game, aim, color)
-            if aim.path is not None:
-                self._draw_reticle(image, aim, color, t, scale)
+            self._draw_reticle(image, aim, color, t, scale)
 
     def _draw_bottle(self, image, bottle, t: float) -> None:
         sprite = assets.bottle_sprite(int(bottle.radius * 2.6))
