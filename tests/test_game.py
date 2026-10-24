@@ -318,3 +318,17 @@ def test_practice_ignores_second_player_as_a_target():
     game, t = start_practice()
     t = fire(game, t, settle_frames=20)
     assert game.states[2].hp == game.cfg.max_hp
+
+
+def test_practice_shatters_one_of_several_bottles():
+    game, t = start_practice()
+    step(game, alone, 1, t)
+    first, second = game.bottles[:2]
+    game._shatter(1, second, t)
+    assert first in game.bottles and second not in game.bottles
+
+
+def test_practice_does_not_ask_for_a_player_who_never_joined():
+    game, t = start_practice()
+    step(game, alone, int(game.cfg.come_back_after_s / DT) + 5, t)
+    assert game.missing_players == []

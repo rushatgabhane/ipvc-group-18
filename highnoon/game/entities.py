@@ -95,7 +95,7 @@ class Powerup:
         return falling(self.origin, self.velocity, self.gravity, t - self.t_spawn)
 
 
-@dataclass
+@dataclass(eq=False)
 class Bottle:
     center: np.ndarray
     radius: float
