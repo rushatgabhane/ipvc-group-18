@@ -103,9 +103,7 @@ class Game:
         return [
             player.id
             for player in self._players.values()
-            if not player.visible
-            and self._t - player.last_seen > self.cfg.come_back_after_s
-            and (player.id in self.states or not self.cfg.practice)
+            if not player.visible and self._t - player.last_seen > self.cfg.come_back_after_s
         ]
 
     def countdown_left(self, t: float) -> float:

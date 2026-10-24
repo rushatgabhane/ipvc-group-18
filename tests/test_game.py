@@ -328,7 +328,7 @@ def test_practice_shatters_one_of_several_bottles():
     assert first in game.bottles and second not in game.bottles
 
 
-def test_practice_does_not_ask_for_a_player_who_never_joined():
+def test_practice_with_one_player_never_asks_anyone_to_come_back():
     game, t = start_practice()
-    step(game, alone, int(game.cfg.come_back_after_s / DT) + 5, t)
+    step(game, lambda: [make_player(1, 300)], int(game.cfg.come_back_after_s / DT) + 5, t)
     assert game.missing_players == []

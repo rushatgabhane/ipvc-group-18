@@ -55,6 +55,7 @@ def parse_args() -> Config:
     cfg.game.practice = args.practice
     if args.practice:
         cfg.games_csv = None
+        cfg.perception.max_players = 1
     return cfg
 
 
