@@ -11,9 +11,6 @@ MAX_STEP_S = 0.05
 SHAKE_S = 0.3
 UP = -np.pi / 2
 GRENADE_SCALE = 1.4
-BOOM = ("BOOM!", (40, 150, 255), 120)
-GRENADE_BOOM = ("BOOM!", (40, 150, 255), int(120 * GRENADE_SCALE))
-GRENADE_WARNING = ("GRENADE! DUCK!", (60, 60, 240), 84)
 PICKUP_SIZE = 72
 ANNOUNCE_IN_S = 0.18
 ANNOUNCE_OUT_S = 0.2
@@ -21,6 +18,8 @@ ANNOUNCE_MIN_HOLD_S = 0.45
 MAX_PENDING = 2
 KNOCKOUT = ("K.O.!", (40, 40, 220), 200)
 KNOCKOUT_S = 1.3
+FIGHT = ("FIGHT!", (40, 190, 255), 200)
+FIGHT_S = 1.0
 
 
 def headshot_announcement(color) -> tuple[str, tuple[int, int, int], int]:
@@ -128,12 +127,12 @@ class FX:
             "headshot": self._hit,
             "blocked": self._blocked,
             "explosion": self._explosion,
-            "grenade": self._grenade_thrown,
+            "grenade": self._ignore,
             "safe": self._safe,
             "pickup": self._pickup,
             "camping": self._camping,
-            "dry_fire": self._dry_fire,
-            "reload": self._reloaded,
+            "dry_fire": self._ignore,
+            "reload": self._ignore,
         }
 
     def update(self, t: float, effects) -> None:
@@ -213,7 +212,6 @@ class FX:
             effect.pos, 18, (60, 120, 180), (120, 380), (0.4, 0.9), (2, 5), spread=np.pi * 0.9, direction=UP
         )
         burst(effect.pos, 8, (150, 230, 255), (80, 200), (0.05, 0.15), (2, 3), gravity=False)
-        self._float_text("BLOCKED", effect, t, (180, 220, 255), 32, 0.7)
 
     def _explosion(self, effect, t: float) -> None:
         scale = GRENADE_SCALE if effect.detail == "grenade" else 1.0
@@ -227,19 +225,12 @@ class FX:
         burst(24, (120, 225, 255), (450, 900), (0.3, 0.6), (1, 3))
         burst(30, (70, 72, 78), (30, 170), (0.8, 1.6), (7, 14), gravity=False, spread=np.pi, direction=UP)
         self._shake(t, 22.0 * scale)
-        self._announce(GRENADE_BOOM if effect.detail == "grenade" else BOOM, t, duration=0.9)
 
-    def _grenade_thrown(self, effect, t: float) -> None:
-        self._announce(GRENADE_WARNING, t, duration=1.3)
+    def _ignore(self, effect, t: float) -> None:
+        pass
 
     def _safe(self, effect, t: float) -> None:
         self._float_text("SAFE!", effect, t, (140, 240, 160), 52)
-
-    def _dry_fire(self, effect, t: float) -> None:
-        self._float_text("EMPTY!", effect, t, (60, 60, 235), 40, 0.7)
-
-    def _reloaded(self, effect, t: float) -> None:
-        self._float_text("RELOADED", effect, t, (90, 215, 255), 36, 0.7)
 
     def _camping(self, effect, t: float) -> None:
         self.particles.burst(effect.pos, 10, (60, 60, 235), (60, 200), (0.2, 0.5), (2, 4), gravity=False)
@@ -249,5 +240,4 @@ class FX:
         player_color = self.player_colors.get(effect.player, (255, 255, 255))
         self.particles.burst(effect.pos, 40, POWERUP_COLORS[effect.detail], (150, 500), (0.3, 0.8), (2, 6))
         self.particles.burst(effect.pos, 16, (255, 255, 255), (80, 260), (0.1, 0.3), (2, 3), gravity=False)
-        self._float_text(POWERUP_LABELS[effect.detail], effect, t, player_color, 48)
         self._announce(pickup_announcement(effect.player, effect.detail, player_color), t, duration=1.2)

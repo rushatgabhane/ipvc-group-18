@@ -7,7 +7,7 @@ import numpy as np
 
 from highnoon.game.game import Game
 from highnoon.render import assets
-from highnoon.render.assets import HUD_FONT, TITLE_FONT, TextCache, blit_center
+from highnoon.render.assets import TITLE_FONT, TextCache, blit_center
 from highnoon.render.fx import FX
 from highnoon.render.palette import BLACK, CREAM, RED, SAFE_GREEN, WHITE, point
 
@@ -59,8 +59,6 @@ class WorldView:
         wobble = math.sin((t - powerup.t_spawn) * 3) * 25
         token = assets.rotated(assets.powerup_sprite(int(powerup.radius * 2.2), powerup.kind), wobble)
         blit_center(image, token, x, y)
-        label = self.text.get(assets.POWERUP_LABELS[powerup.kind], int(24 * scale), color, HUD_FONT, stroke=2)
-        blit_center(image, label, x, y - powerup.radius - 16 * scale)
 
     def _emit_trails(self, game: Game, t: float, dt: float) -> None:
         if dt <= 0:

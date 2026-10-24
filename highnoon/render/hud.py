@@ -39,10 +39,11 @@ class Hud:
         self._hp_trail: dict[int, float] = {}
         self._winner_reveal_t: float | None = None
         self._knockout_shown = False
+        self._mode: str | None = None
 
     def prewarm(self, height: int) -> None:
         scale = height / 720.0
-        announcements = [effects.BOOM, effects.GRENADE_BOOM, effects.GRENADE_WARNING, effects.KNOCKOUT]
+        announcements = [effects.KNOCKOUT, effects.FIGHT]
         for player_id in self.colors:
             color = self.colors[player_id]
             announcements.append(effects.headshot_announcement(color))
@@ -88,9 +89,13 @@ class Hud:
         scale = image.shape[0] / 720.0
         visible = [p for p in players if p.visible and p.id in game.states]
         round_over = game.winner is not None
+        if game.mode == "duel" and self._mode == "countdown":
+            text, color, size = effects.FIGHT
+            self.fx.interrupt(text, t, color, size, effects.FIGHT_S)
+        self._mode = game.mode
         for player in visible:
             self._ease_hp(player.id, game.states[player.id].hp, dt)
-            self._draw_name_tag(image, game, player, t, scale, round_over)
+            self._draw_name_tag(image, game, player, t, scale)
         if not round_over:
             self._draw_float_texts(image, t, scale)
         for player in visible:
@@ -159,9 +164,7 @@ class Hud:
             return np.array([nose[0], nose[1] - 0.6 * torso], np.float32)
         return None
 
-    def _draw_name_tag(
-        self, image, game: Game, player: Player, t: float, scale: float, round_over: bool
-    ) -> None:
+    def _draw_name_tag(self, image, game: Game, player: Player, t: float, scale: float) -> None:
         target = self._tag_anchor(player, scale)
         if target is None:
             return
@@ -186,11 +189,6 @@ class Hud:
         if fraction > 0.01:
             fill_x = bar_x + max(bar_h, int(bar_w * fraction))
             rounded_rect(image, bar_x, bar_y, fill_x, bar_y + bar_h, bar_h // 2, hp_color(fraction))
-
-        badges = [] if round_over else player_badges(game, player.id)
-        if badges:
-            badge = self.text.get("  ".join(badges), int(22 * scale), CREAM, HUD_FONT, stroke=2)
-            blit_center(image, badge, cx, bar_y + bar_h + 16 * scale)
 
     def _draw_status(
         self, image, game: Game, player_id: int, cx: float, card_top: int, t: float, scale: float
@@ -304,9 +302,6 @@ class Hud:
                 )
                 blit(image, sprite, x, y0 + int(68 * scale))
                 x += sprite.width + int(10 * scale)
-        if state.ammo == 0 and game.winner is None and int(t * 3) % 2 == 0:
-            hint = self.text.get("DUCK TO RELOAD", int(20 * scale), GOLD, HUD_FONT)
-            blit(image, hint, x0 + card_w - hint.width - int(12 * scale), y0 + int(68 * scale))
 
     def _winner_revealed(self, game: Game, t: float) -> bool:
         if game.winner is None:
@@ -368,12 +363,6 @@ def player_side(player_id: int) -> float:
 def needs_reload(game: Game, player_id: int) -> bool:
     state = game.states[player_id]
     return game.mode == "duel" and state.ammo == 0 and not state.rockets and not state.grenades
-
-
-def player_badges(game: Game, player_id: int) -> list[str]:
-    state = game.states[player_id]
-    flags = (("DUCKED", state.frame.ducked), ("ROCKET", state.rockets > 0), ("GRENADE", state.grenades > 0))
-    return [name for name, on in flags if on]
 
 
 def draw_signal_debug(image: np.ndarray, game: Game, players: list[Player], colors: dict) -> None:
