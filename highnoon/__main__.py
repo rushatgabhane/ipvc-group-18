@@ -32,6 +32,9 @@ def parse_args() -> Config:
     parser.add_argument("--no-games-csv", action="store_true", help="do not log per-game stats")
     parser.add_argument("--record", type=Path, help="save the raw camera video of the session (for replay)")
     parser.add_argument("--max-frames", type=int, help="stop after N frames")
+    parser.add_argument(
+        "--practice", action="store_true", help="single-player target practice: shoot bottles, no duel"
+    )
     args = parser.parse_args()
 
     cfg = Config()
@@ -49,6 +52,9 @@ def parse_args() -> Config:
     cfg.games_csv = None if args.no_games_csv else args.games_csv
     cfg.record_video = args.record
     cfg.max_frames = args.max_frames
+    cfg.game.practice = args.practice
+    if args.practice:
+        cfg.games_csv = None
     return cfg
 
 

@@ -8,6 +8,7 @@ from highnoon.contracts import Player
 from highnoon.game.actions import PlayerActions, Shot
 from highnoon.game.entities import (
     Aim,
+    Bottle,
     Bullet,
     Effect,
     Grenade,
@@ -43,6 +44,7 @@ class Game:
         self.rockets: list[Rocket] = []
         self.grenades: list[Grenade] = []
         self.powerup: Powerup | None = None
+        self.bottles: list[Bottle] = []
         self.effects: list[Effect] = []
         self.aims: dict[int, Aim] = {}
         self.mode = "idle"
@@ -50,6 +52,7 @@ class Game:
         self.round_over_t: float | None = None
         self.scores: dict[int, int] = {}
         self._next_powerup_t: float | None = None
+        self._next_bottle_t = 0.0
         self.countdown_end_t: float | None = None
         self._rng = np.random.default_rng(seed)
         self._players: dict[int, Player] = {}
@@ -63,11 +66,12 @@ class Game:
         self._hitboxes = {p.id: hitbox(p) for p in players if p.visible and p.smoothed is not None}
         self._wall = self.wall
         self._create_states(players, reassigned)
-        self._update_mode(sum(p.visible for p in players) >= 2, t)
+        self._update_mode(sum(p.visible for p in players) >= (1 if self.cfg.practice else 2), t)
         if self.round_over_t is not None and t - self.round_over_t >= self.cfg.round_end_s:
             self.reset_round()
             self.mode, self.countdown_end_t = "countdown", t + self.cfg.countdown_s
         self._update_powerup(t)
+        self._update_bottles(t)
         for player in players:
             self._update_player(player, t)
         self._resolve_bullets(t)
@@ -126,6 +130,8 @@ class Game:
         self.grenades.clear()
         self.powerup = None
         self._next_powerup_t = None
+        self.bottles.clear()
+        self._next_bottle_t = 0.0
         self.winner = None
         self.round_over_t = None
 
@@ -172,6 +178,8 @@ class Game:
             self._damage(opponent.id, player_id, drain, "camping", pos, t, "camping")
 
     def _opponent_of(self, player_id: int) -> Player | None:
+        if self.cfg.practice:
+            return None
         return next((p for p in self._players.values() if p.id != player_id and p.id in self._hitboxes), None)
 
     def _fire(self, shooter: int, state: PlayerState, shot: Shot, t: float) -> None:
@@ -222,6 +230,8 @@ class Game:
                 self.effects.append(Effect("blocked", impact, t, bullet.shooter))
             elif kind == "powerup":
                 self._collect(bullet.shooter, target, impact, t)
+            elif kind == "bottle":
+                self._shatter(bullet.shooter, target, t)
         self.bullets = in_flight
 
     def _rocket_launch(self, direction: np.ndarray) -> tuple[np.ndarray, float]:
@@ -296,8 +306,11 @@ class Game:
     def _explode(self, shooter: int, center: np.ndarray, t: float) -> None:
         self.effects.append(Effect("explosion", center, t, shooter))
         radius = self.blast_radius()
+        for bottle in list(self.bottles):
+            if np.linalg.norm(bottle.center - center) <= radius + bottle.radius:
+                self._shatter(shooter, bottle, t)
         for player_id, box in self._hitboxes.items():
-            if player_id == shooter or not self.round_live:
+            if player_id == shooter or not self.round_live or self.cfg.practice:
                 continue
             distance = distance_to_hitbox(center, box)
             if distance <= radius:
@@ -354,7 +367,7 @@ class Game:
         rows = [segment_polygon_hits(starts, ends, self._wall)]
         targets: list[tuple[str, object]] = [("cover", None)]
         for player_id, box in self._hitboxes.items():
-            if player_id == shooter or player_id not in self.states:
+            if player_id == shooter or player_id not in self.states or self.cfg.practice:
                 continue
             head = segment_circle_hits(starts, ends, box.head_center, box.head_radius)
             body = segment_polygon_hits(starts, ends, box.torso)
@@ -369,6 +382,9 @@ class Game:
             hit_radius = self.powerup.radius * self.cfg.powerup_hit_scale
             rows.append(segment_circle_hits(starts, ends, center, hit_radius))
             targets.append(("powerup", self.powerup))
+        for bottle in self.bottles:
+            rows.append(segment_circle_hits(starts, ends, bottle.center, bottle.radius))
+            targets.append(("bottle", bottle))
         return np.stack(rows), targets
 
     def _update_aims(self, players: list[Player]) -> None:
@@ -388,14 +404,14 @@ class Game:
                 self.aims[player.id] = Aim(origin, landing, True, path, spread, direction, weapon)
             elif weapon == "rocket":
                 path, (kind, target) = self._predict_arc(player.id, muzzle, direction)
-                lands_on_player = kind in ("head", "body", "powerup") or (
+                lands_on_player = kind in ("head", "body", "powerup", "bottle") or (
                     kind == "cover" and target is not None
                 )
                 self.aims[player.id] = Aim(origin, path[-1], lands_on_player, path, spread, direction, weapon)
             else:
                 distance, (kind, _) = self._cast(player.id, muzzle, direction)
                 end = muzzle + direction * distance
-                on_target = kind in ("head", "body", "powerup")
+                on_target = kind in ("head", "body", "powerup", "bottle")
                 self.aims[player.id] = Aim(origin, end, on_target, None, spread, direction, weapon)
 
     def _update_powerup(self, t: float) -> None:
@@ -415,8 +431,33 @@ class Game:
         spread = self.cfg.powerup_center_spread
         start = np.array([rng.uniform(0.5 - spread, 0.5 + spread) * self.width, -radius], np.float32)
         velocity = np.array([0.0, (self.wall_top + radius) / fall_s], np.float32)
-        kind = POWERUP_KINDS[int(rng.integers(len(POWERUP_KINDS)))]
+        kinds = POWERUP_KINDS[:1] if self.cfg.practice else POWERUP_KINDS  # a grenade needs an opponent
+        kind = kinds[int(rng.integers(len(kinds)))]
         return Powerup(kind, start, velocity, 0.0, radius, t, t + fall_s)
+
+    def _update_bottles(self, t: float) -> None:
+        if not (self.cfg.practice and self.round_live):
+            return
+        while len(self.bottles) < self.cfg.bottle_count and t >= self._next_bottle_t:
+            self.bottles.append(self._place_bottle(t))
+
+    def _place_bottle(self, t: float) -> Bottle:
+        rng, radius = self._rng, self.cfg.bottle_radius * self.height
+        for _ in range(20):
+            center = np.array(
+                [rng.uniform(0.08, 0.92) * self.width, rng.uniform(0.12, 0.9) * self.wall_top], np.float32
+            )
+            if all(np.linalg.norm(center - b.center) > 3 * radius for b in self.bottles):
+                break
+        return Bottle(center, radius, t)
+
+    def _shatter(self, player_id: int, bottle: Bottle, t: float) -> None:
+        if bottle not in self.bottles:
+            return
+        self.bottles.remove(bottle)
+        self._next_bottle_t = t + self.cfg.bottle_respawn_s
+        self.scores[player_id] = self.scores.get(player_id, 0) + 1
+        self.effects.append(Effect("bottle", bottle.center.copy(), t, player_id))
 
     def _collect(self, player_id: int, powerup: Powerup, pos: np.ndarray, t: float) -> None:
         self.powerup = None

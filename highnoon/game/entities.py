@@ -96,6 +96,13 @@ class Powerup:
 
 
 @dataclass
+class Bottle:
+    center: np.ndarray
+    radius: float
+    t_spawn: float
+
+
+@dataclass
 class Effect:
     kind: str
     pos: np.ndarray

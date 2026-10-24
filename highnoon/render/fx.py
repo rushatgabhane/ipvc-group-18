@@ -130,6 +130,7 @@ class FX:
             "grenade": self._ignore,
             "safe": self._safe,
             "pickup": self._pickup,
+            "bottle": self._bottle,
             "camping": self._camping,
             "dry_fire": self._ignore,
             "reload": self._ignore,
@@ -235,6 +236,11 @@ class FX:
     def _camping(self, effect, t: float) -> None:
         self.particles.burst(effect.pos, 10, (60, 60, 235), (60, 200), (0.2, 0.5), (2, 4), gravity=False)
         self._float_text(f"-{effect.amount}", effect, t, (60, 140, 255), 40)
+
+    def _bottle(self, effect, t: float) -> None:
+        self.particles.burst(effect.pos, 30, (70, 170, 60), (150, 520), (0.4, 0.9), (2, 5))
+        self.particles.burst(effect.pos, 10, (230, 255, 230), (80, 250), (0.1, 0.3), (1, 3), gravity=False)
+        self._float_text("+1", effect, t, (140, 240, 160), 48)
 
     def _pickup(self, effect, t: float) -> None:
         player_color = self.player_colors.get(effect.player, (255, 255, 255))

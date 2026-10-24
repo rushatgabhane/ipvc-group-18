@@ -67,6 +67,7 @@ python3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m highnoon                 # webcam 0, 1280x720
 .\.venv\Scripts\python.exe -m highnoon --source 1      # another camera
 .\.venv\Scripts\python.exe -m highnoon --help          # all options
+.\.venv\Scripts\python.exe -m highnoon --practice      # single player: shoot bottles to test the mechanics
 ```
 
 ### mac/linux
@@ -76,6 +77,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m highnoon --source 1      # another camera
 .venv/bin/python -m highnoon --help          # all options
 .venv/bin/python -m highnoon --delegate cpu  # force CPU inference (default: auto)
+.venv/bin/python -m highnoon --practice      # single player: shoot bottles to test the mechanics
 ```
 
 Keys: `q`/`esc` quit, `r` restart round, `d` debug overlay (skeleton, signal values, timings;

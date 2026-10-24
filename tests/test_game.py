@@ -3,7 +3,7 @@ import pytest
 
 from highnoon.config import GameConfig
 from highnoon.contracts import MotionSignals, Player, PoseObservation
-from highnoon.game.entities import Powerup
+from highnoon.game.entities import Bottle, Powerup
 from highnoon.game.game import Game
 from highnoon.game.geometry import (
     ray_exit_distance,
@@ -281,3 +281,40 @@ def test_in_between_updates_on_the_same_frame_do_not_fire_twice():
     game.update(fist, t, set())
     game.update(fist, t + DT / 2, set())
     assert len(game.bullets) == 1 and game.states[1].ammo == game.cfg.max_ammo - 1
+
+
+def start_practice():
+    game = Game(GameConfig(practice=True), (1280, 720))
+    t = step(game, alone, int(game.cfg.countdown_s / DT) + 2, 0.0)
+    assert game.mode == "duel"
+    return game, t
+
+
+def test_practice_starts_with_one_player_and_spawns_bottles_above_the_wall():
+    game, t = start_practice()
+    step(game, alone, 2, t)
+    assert len(game.bottles) == game.cfg.bottle_count
+    assert all(b.center[1] < game.wall_top for b in game.bottles)
+
+
+def test_practice_bullet_shatters_bottle_and_scores():
+    game, t = start_practice()
+    step(game, alone, 1, t)
+    muzzle = game.muzzle(alone()[0].signals.aim_origin, np.array([1.0, 0.0], np.float32))
+    game.bottles = [Bottle(muzzle + np.array([200.0, 0.0], np.float32), 40.0, 0.0)]
+    game._next_bottle_t = np.inf
+    t = fire_alone(game, t)
+    assert game.scores[1] == 1
+    assert not game.bottles
+
+
+def fire_alone(game, t):
+    t = step(game, alone, 12, t)
+    t = step(game, lambda: [make_player(1, 300, hand=FIST), Player(id=2)], 1, t)
+    return step(game, alone, 20, t)
+
+
+def test_practice_ignores_second_player_as_a_target():
+    game, t = start_practice()
+    t = fire(game, t, settle_frames=20)
+    assert game.states[2].hp == game.cfg.max_hp

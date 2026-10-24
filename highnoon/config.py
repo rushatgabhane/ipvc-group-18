@@ -86,6 +86,10 @@ class GameConfig:
     rocket_min_damage: int = 20
     grenade_flight_s: float = 1.4
     grenade_arc: float = 0.45
+    practice: bool = False
+    bottle_count: int = 4
+    bottle_radius: float = 0.06
+    bottle_respawn_s: float = 0.6
 
 
 @dataclass

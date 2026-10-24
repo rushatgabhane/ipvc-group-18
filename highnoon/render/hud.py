@@ -23,6 +23,7 @@ GET_UP_WARNING = "GET UP!"
 CAMPER_WARNING = "GET OUT CAMPER!"
 COUNTDOWN_SIZE = 220
 WAITING_LINES = (("TWO PLAYERS", 110), ("STEP INTO VIEW", 80))
+PRACTICE_WAITING_LINES = (("PRACTICE", 110), ("STEP INTO VIEW", 80))
 COUNTDOWN_COLOR = GOLD
 ZOOM_FROM = 0.3
 ZOOM_OVERSHOOT = 1.15
@@ -61,6 +62,7 @@ class Hud:
             self._camping_sprite(warning, scale)
         self.text.get("RELOADING", int(26 * scale), GOLD, HUD_FONT, stroke=2)
         self._waiting_sprites(scale)
+        self._waiting_sprites(scale, PRACTICE_WAITING_LINES)
         for player_id in self.colors:
             self._come_back_sprite(player_id, scale)
         for number in range(1, 4):
@@ -107,21 +109,22 @@ class Hud:
         if game.mode == "countdown":
             self._draw_countdown(image, game.countdown_left(t), scale)
         if game.mode == "idle":
-            self._draw_waiting(image, t, scale)
+            lines = PRACTICE_WAITING_LINES if game.cfg.practice else WAITING_LINES
+            self._draw_waiting(image, t, scale, lines)
         if not round_over:
             self._draw_come_back(image, game.missing_players, t, scale)
         self._draw_announcements(image, t, scale)
 
-    def _waiting_sprites(self, scale: float):
+    def _waiting_sprites(self, scale: float, lines=WAITING_LINES):
         return [
             self._announcement_sprite(line, size, GOLD if i == 0 else CREAM, scale)
-            for i, (line, size) in enumerate(WAITING_LINES)
+            for i, (line, size) in enumerate(lines)
         ]
 
-    def _draw_waiting(self, image, t: float, scale: float) -> None:
+    def _draw_waiting(self, image, t: float, scale: float, lines) -> None:
         height, width = image.shape[:2]
         pulse = 1.0 + 0.04 * math.sin(t * 3)
-        top, bottom = self._waiting_sprites(scale)
+        top, bottom = self._waiting_sprites(scale, lines)
         blit_center(image, assets.scaled(top, pulse), width / 2, height * 0.36)
         blit_center(image, assets.scaled(bottom, pulse), width / 2, height * 0.36 + top.height * 0.9)
 
@@ -259,7 +262,8 @@ class Hud:
 
         name = self.text.get(f"PLAYER {player.id}", int(30 * scale), color, HUD_FONT)
         blit(image, name, x0 + int(22 * scale), y0 + int(6 * scale))
-        score = self.text.get(f"{game.scores.get(player.id, 0)} WINS", int(24 * scale), CREAM, HUD_FONT)
+        unit = "BOTTLES" if game.cfg.practice else "WINS"
+        score = self.text.get(f"{game.scores.get(player.id, 0)} {unit}", int(24 * scale), CREAM, HUD_FONT)
         blit(image, score, x0 + card_w - score.width - int(12 * scale), y0 + int(10 * scale))
 
         self._draw_hp_bar(image, game, player.id, x0, y0, card_w, scale)

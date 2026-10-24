@@ -33,6 +33,8 @@ class WorldView:
 
     def draw(self, image: np.ndarray, game: Game, t: float, dt: float) -> None:
         scale = image.shape[0] / 720.0
+        for bottle in game.bottles:
+            self._draw_bottle(image, bottle, t)
         self._draw_powerup(image, game, t, scale)
         self._emit_trails(game, t, dt)
         self._draw_particles(image)
@@ -45,6 +47,11 @@ class WorldView:
             draw_weapon(image, game, aim, color)
             if aim.path is not None:
                 self._draw_reticle(image, aim, color, t, scale)
+
+    def _draw_bottle(self, image, bottle, t: float) -> None:
+        sprite = assets.bottle_sprite(int(bottle.radius * 2.6))
+        pop = min(1.0, (t - bottle.t_spawn) / 0.15)
+        blit_center(image, sprite, *bottle.center, alpha=pop)
 
     def _draw_powerup(self, image, game: Game, t: float, scale: float) -> None:
         powerup = game.powerup

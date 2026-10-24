@@ -303,6 +303,23 @@ def draw_grenade_icon(canvas: np.ndarray, c: int, k: float) -> None:
 
 
 @lru_cache(maxsize=4)
+def bottle_sprite(height: int) -> Sprite:
+    width = int(height * 0.42)
+    canvas, w, h = supersampled(width, height)
+    glass, shade, shine = (60, 140, 50, 255), (35, 85, 30, 255), (190, 240, 190, 255)
+    cx, neck_w, body_w = w // 2, int(w * 0.16), int(w * 0.44)
+    body_top, neck_top = int(h * 0.42), int(h * 0.04)
+    cv2.rectangle(canvas, (cx - neck_w, neck_top), (cx + neck_w, body_top + 8), glass, -1)
+    cv2.rectangle(canvas, (cx - int(neck_w * 1.25), neck_top), (cx + int(neck_w * 1.25), int(h * 0.1)), shade, -1)
+    cv2.ellipse(canvas, (cx, body_top + 8), (body_w, int(h * 0.16)), 0, 180, 360, glass, -1, cv2.LINE_AA)
+    cv2.rectangle(canvas, (cx - body_w, body_top + 8), (cx + body_w, h - 2), glass, -1)
+    cv2.rectangle(canvas, (cx - body_w, int(h * 0.62)), (cx + body_w, int(h * 0.84)), (200, 225, 235, 255), -1)
+    cv2.rectangle(canvas, (cx + body_w // 2, body_top + 8), (cx + body_w, h - 2), shade, -1)
+    cv2.line(canvas, (cx - body_w // 2, int(h * 0.5)), (cx - body_w // 2, int(h * 0.58)), shine, 3 * SUPERSAMPLE)
+    return Sprite.from_bgra(outlined(downsample(canvas, width, height).bgra, (20, 25, 40)))
+
+
+@lru_cache(maxsize=4)
 def grenade_sprite(height: int) -> Sprite:
     return art_sprite("grenade.png", height)
 
