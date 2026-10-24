@@ -25,6 +25,9 @@ COUNTDOWN_SIZE = 220
 WAITING_LINES = (("TWO PLAYERS", 110), ("STEP INTO VIEW", 80))
 PRACTICE_WAITING_LINES = (("PRACTICE", 110), ("STEP INTO VIEW", 80))
 COUNTDOWN_COLOR = GOLD
+WIN_SUBTITLE = "WINS THE ROUND"
+BLOWN_UP = "BLOWN UP"
+BLOWN_UP_SUBTITLE = "DON'T SHOOT THE BOMBS"
 ZOOM_FROM = 0.3
 ZOOM_OVERSHOOT = 1.15
 SHRINK_TO = 0.4
@@ -67,11 +70,13 @@ class Hud:
             self._come_back_sprite(player_id, scale)
         for number in range(1, 4):
             self._countdown_sprite(number, scale)
+        self._blown_up_sprite(scale)
         for seconds_left in range(5):
-            self._round_over_texts(seconds_left, scale)
+            for subtitle in (WIN_SUBTITLE, BLOWN_UP_SUBTITLE):
+                self._round_over_texts(seconds_left, scale, subtitle)
 
-    def _round_over_texts(self, seconds_left: int, scale: float):
-        subtitle = self.text.get("WINS THE ROUND", int(48 * scale), CREAM, HUD_FONT, stroke=2)
+    def _round_over_texts(self, seconds_left: int, scale: float, subtitle: str = WIN_SUBTITLE):
+        subtitle = self.text.get(subtitle, int(48 * scale), CREAM, HUD_FONT, stroke=2)
         countdown = self.text.get(f"NEXT ROUND IN {seconds_left}", int(28 * scale), GOLD, HUD_FONT)
         return subtitle, countdown
 
@@ -87,10 +92,13 @@ class Hud:
         color = self.colors.get(player_id, WHITE)
         return self.text.get(f"PLAYER {player_id}", int(110 * scale), color, TITLE_FONT, stroke=4, shadow=6)
 
+    def _blown_up_sprite(self, scale: float):
+        return self.text.get(BLOWN_UP, int(110 * scale), RED, TITLE_FONT, stroke=4, shadow=6)
+
     def draw(self, image: np.ndarray, game: Game, players: list[Player], t: float, dt: float) -> None:
         scale = image.shape[0] / 720.0
         visible = [p for p in players if p.visible and p.id in game.states]
-        round_over = game.winner is not None
+        round_over = game.round_over_t is not None
         if game.mode == "duel" and self._mode == "countdown":
             text, color, size = effects.FIGHT
             self.fx.interrupt(text, t, color, size, effects.FIGHT_S)
@@ -308,7 +316,7 @@ class Hud:
                 x += sprite.width + int(10 * scale)
 
     def _winner_revealed(self, game: Game, t: float) -> bool:
-        if game.winner is None:
+        if game.round_over_t is None:
             self._winner_reveal_t, self._knockout_shown = None, False
             return False
         if self._winner_reveal_t is None:
@@ -325,9 +333,12 @@ class Hud:
         height, width = image.shape[:2]
         cv2.convertScaleAbs(image, dst=image, alpha=0.45)
         age = t - self._winner_reveal_t
-        name = self._winner_name(game.winner, scale)
+        if game.winner is None:
+            name, subtitle_text = self._blown_up_sprite(scale), BLOWN_UP_SUBTITLE
+        else:
+            name, subtitle_text = self._winner_name(game.winner, scale), WIN_SUBTITLE
         left = game.cfg.round_end_s - (t - (game.round_over_t or t))
-        subtitle, countdown = self._round_over_texts(max(0, math.ceil(left)), scale)
+        subtitle, countdown = self._round_over_texts(max(0, math.ceil(left)), scale, subtitle_text)
         zoom, alpha = zoom_in(age)
         y = height * 0.42
         blit_center(image, assets.scaled(name, zoom), width / 2, y, alpha)

@@ -17,8 +17,9 @@ TITLE_FONT = FONT_DIR / "Rye-Regular.ttf"
 HUD_FONT = FONT_DIR / "BebasNeue-Regular.ttf"
 SUPERSAMPLE = 4
 ROTATION_STEP_DEG = 4
+HORIZON = 0.62
 
-POWERUP_COLORS = {"rocket": (30, 120, 240), "grenade": (60, 150, 70)}
+POWERUP_COLORS = {"rocket": (30, 120, 240), "grenade": (60, 150, 70), "bomb": (40, 40, 200)}
 POWERUP_LABELS = {"rocket": "ROCKET LAUNCHER", "grenade": "GRENADE"}
 
 
@@ -269,7 +270,9 @@ def powerup_sprite(size: int, kind: str) -> Sprite:
     shine = (int(r * 0.7), int(r * 0.7))
     cv2.ellipse(canvas, (c, c), shine, 0, 200, 290, (255, 255, 255, 140), 3 * SUPERSAMPLE, cv2.LINE_AA)
     icon_size = r * 0.42
-    {"rocket": draw_rocket_icon, "grenade": draw_grenade_icon}[kind](canvas, c, icon_size)
+    {"rocket": draw_rocket_icon, "grenade": draw_grenade_icon, "bomb": draw_bomb_icon}[kind](
+        canvas, c, icon_size
+    )
     return downsample(canvas, size, size)
 
 
@@ -302,6 +305,47 @@ def draw_grenade_icon(canvas: np.ndarray, c: int, k: float) -> None:
     cv2.circle(canvas, ring_center, int(k * 0.25), WHITE_BGRA, 2 * SUPERSAMPLE, cv2.LINE_AA)
 
 
+def draw_bomb_icon(canvas: np.ndarray, c: int, k: float) -> None:
+    body_center = (int(c - k * 0.1), int(c + k * 0.15))
+    cv2.circle(canvas, body_center, int(k * 0.8), WHITE_BGRA, -1, cv2.LINE_AA)
+    cv2.rectangle(
+        canvas, (int(c + k * 0.2), int(c - k * 0.75)), (int(c + k * 0.55), int(c - k * 0.45)), WHITE_BGRA, -1
+    )
+    fuse = np.array([[c + k * 0.4, c - k * 0.7], [c + k * 0.6, c - k * 1.0], [c + k * 0.9, c - k * 1.05]])
+    cv2.polylines(canvas, [fuse.astype(np.int32)], False, WHITE_BGRA, 2 * SUPERSAMPLE, cv2.LINE_AA)
+    cv2.circle(
+        canvas, (int(c + k * 0.95), int(c - k * 1.05)), int(k * 0.2), (80, 230, 255, 255), -1, cv2.LINE_AA
+    )
+
+
+@lru_cache(maxsize=8)
+def vulture_sprite(wingspan: int, wings_up: bool, facing_right: bool) -> Sprite:
+    width, height = wingspan, int(wingspan * 0.5)
+    canvas, w, h = supersampled(width, height)
+    body, head = (30, 32, 40, 255), (90, 110, 200, 255)
+    cx, cy = w // 2, int(h * 0.55)
+    tip_y = int(h * 0.08) if wings_up else int(h * 0.62)
+    elbow_y = int(h * 0.3) if wings_up else int(h * 0.45)
+    for side in (-1, 1):
+        wing = np.array(
+            [
+                [cx, cy - h * 0.06],
+                [cx + side * w * 0.22, elbow_y],
+                [cx + side * w * 0.5, tip_y],
+                [cx + side * w * 0.3, elbow_y + h * 0.16],
+                [cx, cy + h * 0.1],
+            ],
+            np.int32,
+        )
+        cv2.fillPoly(canvas, [wing], body, cv2.LINE_AA)
+    cv2.ellipse(canvas, (cx, cy), (int(w * 0.11), int(h * 0.13)), 0, 0, 360, body, -1, cv2.LINE_AA)
+    cv2.circle(canvas, (int(cx + w * 0.11), int(cy - h * 0.08)), int(h * 0.07), head, -1, cv2.LINE_AA)
+    sprite = downsample(canvas, width, height)
+    if facing_right:
+        return sprite
+    return Sprite.from_bgra(np.ascontiguousarray(sprite.bgra[:, ::-1]))
+
+
 @lru_cache(maxsize=4)
 def bottle_sprite(height: int) -> Sprite:
     width = int(height * 0.42)
@@ -310,12 +354,18 @@ def bottle_sprite(height: int) -> Sprite:
     cx, neck_w, body_w = w // 2, int(w * 0.16), int(w * 0.44)
     body_top, neck_top = int(h * 0.42), int(h * 0.04)
     cv2.rectangle(canvas, (cx - neck_w, neck_top), (cx + neck_w, body_top + 8), glass, -1)
-    cv2.rectangle(canvas, (cx - int(neck_w * 1.25), neck_top), (cx + int(neck_w * 1.25), int(h * 0.1)), shade, -1)
+    cv2.rectangle(
+        canvas, (cx - int(neck_w * 1.25), neck_top), (cx + int(neck_w * 1.25), int(h * 0.1)), shade, -1
+    )
     cv2.ellipse(canvas, (cx, body_top + 8), (body_w, int(h * 0.16)), 0, 180, 360, glass, -1, cv2.LINE_AA)
     cv2.rectangle(canvas, (cx - body_w, body_top + 8), (cx + body_w, h - 2), glass, -1)
-    cv2.rectangle(canvas, (cx - body_w, int(h * 0.62)), (cx + body_w, int(h * 0.84)), (200, 225, 235, 255), -1)
+    cv2.rectangle(
+        canvas, (cx - body_w, int(h * 0.62)), (cx + body_w, int(h * 0.84)), (200, 225, 235, 255), -1
+    )
     cv2.rectangle(canvas, (cx + body_w // 2, body_top + 8), (cx + body_w, h - 2), shade, -1)
-    cv2.line(canvas, (cx - body_w // 2, int(h * 0.5)), (cx - body_w // 2, int(h * 0.58)), shine, 3 * SUPERSAMPLE)
+    cv2.line(
+        canvas, (cx - body_w // 2, int(h * 0.5)), (cx - body_w // 2, int(h * 0.58)), shine, 3 * SUPERSAMPLE
+    )
     return Sprite.from_bgra(outlined(downsample(canvas, width, height).bgra, (20, 25, 40)))
 
 
@@ -344,32 +394,97 @@ def bullet_sprite(length: int, color: tuple[int, int, int]) -> Sprite:
     return Sprite.from_bgra(outlined(sprite.bgra, color))
 
 
-def desert_background(width: int, height: int, seed: int = 7) -> np.ndarray:
+@dataclass(frozen=True)
+class Daylight:
+    sky_top: tuple[float, float, float]
+    sky_low: tuple[float, float, float]
+    sun_x: float
+    sun_y: float
+    sun: tuple[float, float, float]
+    glow: tuple[float, float, float]
+    land: tuple[float, float, float]
+
+
+DAYLIGHT_KEYS = (
+    (
+        0.0,
+        Daylight((175, 120, 55), (150, 205, 245), 0.8, 0.2, (170, 240, 255), (60, 110, 120), (1.0, 1.0, 1.0)),
+    ),
+    (
+        0.4,
+        Daylight(
+            (165, 110, 70), (115, 190, 250), 0.82, 0.33, (120, 220, 255), (40, 120, 200), (0.85, 0.95, 1.05)
+        ),
+    ),
+    (
+        0.75,
+        Daylight((120, 65, 85), (80, 140, 250), 0.84, 0.47, (70, 150, 255), (30, 90, 230), (0.6, 0.68, 0.9)),
+    ),
+    (
+        1.0,
+        Daylight((70, 35, 45), (95, 85, 170), 0.86, 0.56, (60, 110, 230), (40, 60, 160), (0.42, 0.42, 0.55)),
+    ),
+)
+
+
+def daylight(dusk: float) -> Daylight:
+    stops = [stop for stop, _ in DAYLIGHT_KEYS]
+    fields = Daylight.__dataclass_fields__
+    mixed = {}
+    for name in fields:
+        values = np.array([getattr(key, name) for _, key in DAYLIGHT_KEYS], np.float32)
+        if values.ndim == 1:
+            mixed[name] = float(np.interp(dusk, stops, values))
+        else:
+            mixed[name] = tuple(float(np.interp(dusk, stops, values[:, i])) for i in range(values.shape[1]))
+    return Daylight(**mixed)
+
+
+def tinted(color, tint) -> tuple[int, int, int]:
+    return tuple(int(min(255, c * k)) for c, k in zip(color, tint, strict=True))
+
+
+def desert_background(width: int, height: int, seed: int = 7, dusk: float = 0.0) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    image = sky_with_sun(width, height)
-    horizon = int(height * 0.62)
+    light = daylight(dusk)
+    image = sky_with_sun(width, height, light)
+    horizon = int(height * HORIZON)
     draw_mesa_ridge(
-        image, rng, horizon, horizon - height * 0.05, height * 0.16, (120, 150, 200), height * 0.04
+        image,
+        rng,
+        horizon,
+        horizon - height * 0.05,
+        height * 0.16,
+        tinted((120, 150, 200), light.land),
+        height * 0.04,
     )
     draw_mesa_ridge(
-        image, rng, horizon, horizon - height * 0.01, height * 0.10, (70, 105, 165), height * 0.03
+        image,
+        rng,
+        horizon,
+        horizon - height * 0.01,
+        height * 0.10,
+        tinted((70, 105, 165), light.land),
+        height * 0.03,
     )
-    image[horizon:] = sand(rng, width, height - horizon)
+    ground = sand(rng, width, height - horizon).astype(np.float32) * np.array(light.land, np.float32)
+    image[horizon:] = np.clip(ground, 0, 255).astype(np.uint8)
     for x in (int(width * 0.12), int(width * 0.33), int(width * 0.9)):
-        draw_cactus(image, rng, x, horizon + int(height * 0.01), int(height * rng.uniform(0.06, 0.1)))
+        cactus_h = int(height * rng.uniform(0.06, 0.1))
+        draw_cactus(image, rng, x, horizon + int(height * 0.01), cactus_h, tinted((45, 85, 60), light.land))
     return image
 
 
-def sky_with_sun(width: int, height: int) -> np.ndarray:
+def sky_with_sun(width: int, height: int, light: Daylight) -> np.ndarray:
     t = np.linspace(0, 1, height, dtype=np.float32)[:, None, None]
-    top, low = np.array([175, 120, 55], np.float32), np.array([150, 205, 245], np.float32)
+    top, low = np.array(light.sky_top, np.float32), np.array(light.sky_low, np.float32)
     sky = (top + (low - top) * np.clip(t / 0.62, 0, 1) ** 1.3) * np.ones((1, width, 1), np.float32)
-    sun_x, sun_y, sun_r = int(width * 0.8), int(height * 0.2), int(height * 0.075)
+    sun_x, sun_y, sun_r = int(width * light.sun_x), int(height * light.sun_y), int(height * 0.075)
     yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
     glow = np.clip(1 - np.sqrt((xx - sun_x) ** 2 + (yy - sun_y) ** 2) / (sun_r * 5), 0, 1) ** 2.2
-    sky += glow[:, :, None] * np.array([60, 110, 120], np.float32)
+    sky += glow[:, :, None] * np.array(light.glow, np.float32)
     image = np.clip(sky, 0, 255).astype(np.uint8)
-    cv2.circle(image, (sun_x, sun_y), sun_r, (170, 240, 255), -1, cv2.LINE_AA)
+    cv2.circle(image, (sun_x, sun_y), sun_r, tuple(int(c) for c in light.sun), -1, cv2.LINE_AA)
     return image
 
 
@@ -393,9 +508,8 @@ def sand(rng, width: int, height: int) -> np.ndarray:
     return np.clip(ground, 0, 255).astype(np.uint8)
 
 
-def draw_cactus(image, rng, x: int, base: int, height: int) -> None:
+def draw_cactus(image, rng, x: int, base: int, height: int, color=(45, 85, 60)) -> None:
     trunk = max(4, height // 7)
-    color = (45, 85, 60)
     cv2.rectangle(image, (x - trunk // 2, base - height), (x + trunk // 2, base), color, -1)
     cv2.circle(image, (x, base - height), trunk // 2, color, -1, cv2.LINE_AA)
     for side in (-1, 1):

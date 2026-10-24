@@ -23,6 +23,7 @@ from highnoon.game.geometry import ray_exit_distance, rect_polygon, segment_circ
 NOSE = 0
 TORSO_CORNERS = [11, 12, 24, 23]
 POWERUP_KINDS = ("rocket", "grenade")
+PRACTICE_POWERUP_KINDS = ("rocket", "bomb")
 EFFECT_LIFETIME_S = 0.8
 HEAD_RADIUS_PER_FACE = 0.6
 HEAD_RADIUS_PER_TORSO = 0.35
@@ -50,6 +51,8 @@ class Game:
         self.mode = "idle"
         self.winner: int | None = None
         self.round_over_t: float | None = None
+        self.round = 0
+        self.round_start_t = 0.0
         self.scores: dict[int, int] = {}
         self._next_powerup_t: float | None = None
         self._next_bottle_t = 0.0
@@ -134,6 +137,8 @@ class Game:
         self._next_bottle_t = 0.0
         self.winner = None
         self.round_over_t = None
+        self.round += 1
+        self.round_start_t = self._t
 
     def _create_states(self, players: list[Player], reassigned: set[int]) -> None:
         for player in players:
@@ -326,9 +331,10 @@ class Game:
         state.last_hit_t = t
         self.effects.append(Effect(effect, pos, t, shooter, amount, detail=source))
         if state.hp == 0:
-            self.winner = shooter
             self.round_over_t = t
-            self.scores[shooter] = self.scores.get(shooter, 0) + 1
+            if shooter != target:
+                self.winner = shooter
+                self.scores[shooter] = self.scores.get(shooter, 0) + 1
 
     def muzzle(self, hand: np.ndarray, direction: np.ndarray, weapon: str = "gun") -> np.ndarray:
         return (hand + direction * self.reach(weapon) * self.height).astype(np.float32)
@@ -419,11 +425,13 @@ class Game:
             self.powerup = None
         if not self.round_live:
             return
+        cfg = self.cfg
+        interval = cfg.practice_powerup_interval_s if cfg.practice else cfg.powerup_interval_s
         if self._next_powerup_t is None:
-            self._next_powerup_t = t + self.cfg.powerup_interval_s
+            self._next_powerup_t = t + interval
         if t >= self._next_powerup_t and self.powerup is None:
             self.powerup = self._toss_powerup(t)
-            self._next_powerup_t = t + self.cfg.powerup_interval_s
+            self._next_powerup_t = t + interval
 
     def _toss_powerup(self, t: float) -> Powerup:
         rng, fall_s = self._rng, self.cfg.powerup_fall_s
@@ -431,7 +439,7 @@ class Game:
         spread = self.cfg.powerup_center_spread
         start = np.array([rng.uniform(0.5 - spread, 0.5 + spread) * self.width, -radius], np.float32)
         velocity = np.array([0.0, (self.wall_top + radius) / fall_s], np.float32)
-        kinds = POWERUP_KINDS[:1] if self.cfg.practice else POWERUP_KINDS  # a grenade needs an opponent
+        kinds = PRACTICE_POWERUP_KINDS if self.cfg.practice else POWERUP_KINDS
         kind = kinds[int(rng.integers(len(kinds)))]
         return Powerup(kind, start, velocity, 0.0, radius, t, t + fall_s)
 
@@ -462,11 +470,22 @@ class Game:
     def _collect(self, player_id: int, powerup: Powerup, pos: np.ndarray, t: float) -> None:
         self.powerup = None
         state = self.states[player_id]
+        if powerup.kind == "bomb":
+            self._set_off_bomb(player_id, pos, t)
+            return
         if powerup.kind == "rocket":
             state.rockets = 1
         else:
             state.grenades = 1
         self.effects.append(Effect("pickup", pos, t, player_id, detail=powerup.kind))
+
+    def _set_off_bomb(self, player_id: int, pos: np.ndarray, t: float) -> None:
+        self.effects.append(Effect("explosion", pos, t, player_id, detail="bomb"))
+        if not self.round_live:
+            return
+        box = self._hitboxes.get(player_id)
+        hurt_at = box.torso.mean(axis=0) if box else pos
+        self._damage(player_id, player_id, self.cfg.bomb_damage, "hit", hurt_at, t, "bomb")
 
 
 def hitbox(player: Player) -> Hitbox:

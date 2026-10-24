@@ -36,7 +36,7 @@ class SoundBoard:
         }
         self._seen: set[int] = set()
         self._mode: str | None = None
-        self._winner: int | None = None
+        self._round_over = False
 
     def update(self, game, t: float) -> None:
         current = {id(effect) for effect in game.effects}
@@ -46,6 +46,7 @@ class SoundBoard:
         self._seen = current
         if game.mode == "duel" and self._mode == "countdown":
             self._sources["fight"].play()
-        if game.winner is not None and self._winner is None:
+        round_over = game.round_over_t is not None
+        if round_over and not self._round_over:
             self._sources["ko"].play()
-        self._mode, self._winner = game.mode, game.winner
+        self._mode, self._round_over = game.mode, round_over

@@ -332,3 +332,35 @@ def test_practice_with_one_player_never_asks_anyone_to_come_back():
     game, t = start_practice()
     step(game, lambda: [make_player(1, 300)], int(game.cfg.come_back_after_s / DT) + 5, t)
     assert game.missing_players == []
+
+
+def test_practice_bomb_hurts_whoever_shoots_it():
+    game, t = start_practice()
+    step(game, alone, 1, t)
+    bomb = Powerup("bomb", np.zeros(2, np.float32), np.zeros(2, np.float32), 0.0, 40.0, t, t + 5)
+    game._collect(1, bomb, np.array([600.0, 200.0], np.float32), t)
+    assert game.states[1].hp == game.cfg.max_hp - game.cfg.bomb_damage
+    assert any(e.kind == "explosion" and e.detail == "bomb" for e in game.effects)
+    assert game.states[1].rockets == 0 and game.states[1].grenades == 0
+
+
+def test_blowing_yourself_up_ends_the_round_without_a_winner():
+    game, t = start_practice()
+    step(game, alone, 1, t)
+    round_before = game.round
+    game.states[1].hp = game.cfg.bomb_damage
+    bomb = Powerup("bomb", np.zeros(2, np.float32), np.zeros(2, np.float32), 0.0, 40.0, t, t + 5)
+    game._collect(1, bomb, np.array([600.0, 200.0], np.float32), t)
+    assert game.states[1].hp == 0 and game.round_over_t is not None
+    assert game.winner is None and game.scores.get(1, 0) == 0
+    step(game, alone, int(game.cfg.round_end_s / DT) + 2, t)
+    assert game.round > round_before and game.states[1].hp == game.cfg.max_hp
+
+
+def test_bombs_only_drop_in_practice():
+    duel_game, _ = start_duel()
+    practice_game, _ = start_practice()
+    duel_kinds = {duel_game._toss_powerup(0.0).kind for _ in range(40)}
+    practice_kinds = {practice_game._toss_powerup(0.0).kind for _ in range(40)}
+    assert duel_kinds == {"rocket", "grenade"}
+    assert practice_kinds == {"rocket", "bomb"}

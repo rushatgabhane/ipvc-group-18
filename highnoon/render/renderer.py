@@ -11,6 +11,8 @@ from highnoon.render import assets
 from highnoon.render.fx import FX
 from highnoon.render.hud import Hud, draw_signal_debug
 from highnoon.render.palette import PLAYER_COLORS, WHITE
+from highnoon.render.scenery import Scenery
+from highnoon.render.wildlife import Wildlife
 from highnoon.render.world import WorldView
 
 TORSO_BONES = [(11, 12), (11, 23), (12, 24), (23, 24)]
@@ -30,9 +32,9 @@ class Renderer:
         self.fx = FX(PLAYER_COLORS)
         self.world = WorldView(PLAYER_COLORS, self.text, self.fx)
         self.hud = Hud(PLAYER_COLORS, self.text, self.fx)
+        self.scenery = Scenery()
+        self.wildlife = Wildlife()
         self.shake = (0, 0)
-        self._size: tuple[int, int] | None = None
-        self._wall_top = 0
         self._t_last: float | None = None
 
     def render(
@@ -44,7 +46,9 @@ class Renderer:
     def set_camera(self, perception: Perception, players: list[Player], game: Game) -> None:
         frame = perception.frame
         height, width = frame.image.shape[:2]
-        self._build_scenery(width, height, game.cfg.cover_height)
+        if self.scenery.build(width, height, game.cfg.cover_height):
+            self.hud.prewarm(height)
+        self.scenery.update(game)
         base = self._camera_layer(frame.image, perception.mask)
         if self.cfg.show_debug:
             for player in players:
@@ -60,6 +64,7 @@ class Renderer:
         self._t_last = t
         image = self._base.copy()
         self.fx.update(t, game.effects)
+        self.wildlife.draw(image, game, players, t, dt)
         self.world.draw(image, game, t, dt)
         self.hud.draw(image, game, players, t, dt)
         if self.cfg.show_debug:
@@ -68,25 +73,11 @@ class Renderer:
         self.shake = self.fx.shake_offset(t)
         return image
 
-    def _build_scenery(self, width: int, height: int, cover_height: float) -> None:
-        wall_top = int(height * (1 - cover_height))
-        if self._size == (width, height) and self._wall_top == wall_top:
-            return
-        self._size, self._wall_top = (width, height), wall_top
-        self.hud.prewarm(height)
-        vignette = assets.vignette(width, height)
-        self._background = cv2.multiply(assets.desert_background(width, height), vignette, scale=1 / 255)
-        self._wall = cv2.multiply(
-            assets.wooden_wall(width, height - wall_top), vignette[wall_top:], scale=1 / 255
-        )
-        shadow_h = max(8, height // 40)
-        ramp = (np.linspace(1.0, 0.55, shadow_h, dtype=np.float32) ** 1.5 * 255).astype(np.uint8)
-        self._shadow = cv2.merge([np.tile(ramp[:, None], (1, width))] * 3)
-
     def _draw_wall(self, image: np.ndarray) -> None:
-        above_wall = image[self._wall_top - self._shadow.shape[0] : self._wall_top]
-        cv2.multiply(above_wall, self._shadow, dst=above_wall, scale=1 / 255)
-        image[self._wall_top :] = self._wall
+        scenery = self.scenery
+        above_wall = image[scenery.wall_top - scenery.shadow.shape[0] : scenery.wall_top]
+        cv2.multiply(above_wall, scenery.shadow, dst=above_wall, scale=1 / 255)
+        image[scenery.wall_top :] = scenery.wall
 
     def _camera_layer(self, camera: np.ndarray, mask: np.ndarray | None) -> np.ndarray:
         if not self.cfg.background or mask is None:
@@ -98,7 +89,7 @@ class Renderer:
         cv2.threshold(person, 1.0, 1.0, cv2.THRESH_TRUNC, dst=person)
         cv2.threshold(person, 0.0, 0.0, cv2.THRESH_TOZERO, dst=person)
         cv2.erode(person, ERODE_KERNEL, dst=person)
-        return cv2.blendLinear(camera, self._background, person, 1.0 - person)
+        return cv2.blendLinear(camera, self.scenery.background, person, 1.0 - person)
 
 
 def draw_skeleton(image: np.ndarray, player: Player) -> None:

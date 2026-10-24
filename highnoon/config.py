@@ -87,6 +87,8 @@ class GameConfig:
     grenade_flight_s: float = 1.4
     grenade_arc: float = 0.45
     practice: bool = False
+    practice_powerup_interval_s: float = 10.0
+    bomb_damage: int = 25
     bottle_count: int = 4
     bottle_radius: float = 0.06
     bottle_respawn_s: float = 0.6
