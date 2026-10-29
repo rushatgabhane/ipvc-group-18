@@ -66,15 +66,17 @@ class Renderer:
         dt = 0.0 if self._t_last is None else min(max(0.0, t - self._t_last), MAX_FRAME_STEP_S)
         self._t_last = t
         image = self._base.copy()
+
+        for player in players:
+                    if player.visible and player.face is not None:
+                        color = PLAYER_COLORS.get(player.id, WHITE)
+                        self.face_fx.draw(image, player.face, color)
+
         self.fx.update(t, game.effects)
         self.wildlife.draw(image, game, players, t, dt)
         self.world.draw(image, game, t, dt)
         self.hud.draw(image, game, players, t, dt)
 
-        for player in players:
-            if player.visible and player.face is not None:
-                color = PLAYER_COLORS.get(player.id, WHITE)
-                self.face_fx.draw(image, player.face, color)
 
         if self.cfg.show_debug:
             draw_signal_debug(image, game, players, PLAYER_COLORS)
