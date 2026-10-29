@@ -70,6 +70,12 @@ class Renderer:
         self.wildlife.draw(image, game, players, t, dt)
         self.world.draw(image, game, t, dt)
         self.hud.draw(image, game, players, t, dt)
+
+        for player in players:
+            if player.visible and player.face is not None:
+                color = PLAYER_COLORS.get(player.id, WHITE)
+                self.face_fx.draw(image, player.face, color)
+
         if self.cfg.show_debug:
             draw_signal_debug(image, game, players, PLAYER_COLORS)
             draw_stats(image, profiler, len(perception.poses), len(perception.faces))
