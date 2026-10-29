@@ -77,7 +77,6 @@ class Renderer:
         self.world.draw(image, game, t, dt)
         self.hud.draw(image, game, players, t, dt)
 
-
         if self.cfg.show_debug:
             draw_signal_debug(image, game, players, PLAYER_COLORS)
             draw_stats(image, profiler, len(perception.poses), len(perception.faces))
