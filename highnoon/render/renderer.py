@@ -14,6 +14,7 @@ from highnoon.render.palette import PLAYER_COLORS, WHITE
 from highnoon.render.scenery import Scenery
 from highnoon.render.wildlife import Wildlife
 from highnoon.render.world import WorldView
+from highnoon.render.face_fx import FaceEffectRenderer
 
 TORSO_BONES = [(11, 12), (11, 23), (12, 24), (23, 24)]
 ARM_BONES = [(11, 13), (13, 15), (12, 14), (14, 16)]
@@ -30,12 +31,14 @@ class Renderer:
         self.cfg = cfg
         self.text = assets.TextCache()
         self.fx = FX(PLAYER_COLORS)
+        self.face_fx = FaceEffectRenderer()
         self.world = WorldView(PLAYER_COLORS, self.text, self.fx)
         self.hud = Hud(PLAYER_COLORS, self.text, self.fx)
         self.scenery = Scenery()
         self.wildlife = Wildlife()
         self.shake = (0, 0)
         self._t_last: float | None = None
+        
 
     def render(
         self, perception: Perception, players: list[Player], game: Game, profiler: Profiler
