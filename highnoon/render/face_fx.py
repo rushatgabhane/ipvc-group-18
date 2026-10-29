@@ -9,8 +9,8 @@ class FaceEffectRenderer:
     def __init__(self, alpha: float = 0.9):
         self.alpha = float(np.clip(alpha, 0.0, 1.0))
 
-    @staticmethod
-    def _rotate(points: np.ndarray,
+    def _rotate(self,
+                points: np.ndarray,
                 center: tuple[float, float],
                 angle: float) -> np.ndarray: 
         c, s = np.cos(angle), np.sin(angle)
