@@ -9,19 +9,19 @@ class FaceEffectRenderer:
     def __init__(self, alpha: float = 0.9):
         self.alpha = float(np.clip(alpha, 0.0, 1.0))
 
-
+    @staticmethod
     def _rotate(points: np.ndarray,
                 center: tuple[float, float],
                 angle: float) -> np.ndarray: 
         c, s = np.cos(angle), np.sin(angle)
         rotation = np.array([[c, -s], [s, c]], dtype = np.float32)
-        return (points.astype(np.float32) @ rotation.T +
-                np.asarray(center, dtype = np.float32).astype(np.int32))
+        return points.astype(np.float32) @ rotation.T + np.asarray(
+                    center, dtype = np.float32).astype(np.int32)
 
     def draw(self, image: np.darray, face,
              color: tuple[int, int, int]) -> np.darray:
-        points = np.asarray(face.points, dtype = np.float32)
-        x1, y1, x2, y2 = np.asarray(face.points, dtype = np.float32).reshape(1)[:4]
+        points = np.asarray(face.landmarks, dtype = np.float32)
+        x1, y1, x2, y2 = np.asarray(face.bbox).reshape(-1)[:4]
         width, height = float(x2-x1), float(y2-y1)
 
         if width < 8 or height < 8:
@@ -32,7 +32,7 @@ class FaceEffectRenderer:
             left_eye, right_eye = points[468], points[473] #mediapipe eyes iris center landmarks
             angle = float(np.arctan2(
                 right_eye[1] - left_eye[1],
-                right_eye[0], left_eye[0]
+                right_eye[0] - left_eye[0]
             ))
         
         hat_width = width * 1.1
@@ -58,8 +58,12 @@ class FaceEffectRenderer:
         cover = self._rotate(cover, center, angle)
 
         overlay = image.copy()
-        cv2.fillPoly(overlay, [brim], color, cv2.LINE_AA)
-        cv2.fillPoly(overlay, [cover], color, cv2.LINE_AA)
+        cv2.fillPoly(overlay, 
+                    [np.round(brim).astype(np.int32)],
+                    color, cv2.LINE_AA)
+        cv2.fillPoly(overlay,
+                    [np.round(cover).astype(np.int32)],
+                    color, cv2.LINE_AA)
 
         h, w = image.shape[:2]
         cx, cy = map(int, center)
