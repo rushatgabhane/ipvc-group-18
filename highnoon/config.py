@@ -32,7 +32,7 @@ class PerceptionConfig:
     face_model_path: Path = MODELS_DIR / "face_landmarker.task"
     hand_model_path: Path = MODELS_DIR / "hand_landmarker.task"
     face_id_model_path: Path = MODELS_DIR / "face_recognition_sface_2021dec.onnx"
-    face_id_every: int = 2
+    face_id_every: int = 1
 
 
 @dataclass
