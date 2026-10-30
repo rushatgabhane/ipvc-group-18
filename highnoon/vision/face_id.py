@@ -18,7 +18,7 @@ TEMPLATE = np.array(
 )
 CROP_SIZE = (112, 112)
 MIN_EYE_DISTANCE_PX = 18.0
-MAX_NOSE_OFFSET = 0.35
+MAX_NOSE_OFFSET = 0.5
 
 
 class FaceEmbedder:

@@ -113,8 +113,7 @@ def enrolled_faces_p2_then_left():
     for i in range(10):
         tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
     tr.lock()
-    tr.update(scene(1.0, [(300, ALICE)]))
-    tr.update(scene(5.0, [(300, ALICE)]))
+    play(tr, [(300, ALICE)], 1.0, seconds=5.0)
     return tr
 
 
@@ -135,6 +134,25 @@ def test_returning_player_gets_their_id_back_once_confirmed():
     tr = enrolled_faces_p2_then_left()
     assert ids_by_x(play(tr, [(300, ALICE), (100, BOB)], 6.0, seconds=0.05)) == {1: 300}
     assert ids_by_x(play(tr, [(300, ALICE), (100, BOB)], 6.1)) == {1: 300, 2: 100}
+    assert tr.reassigned == set()
+
+
+def test_player_returning_after_a_short_absence_gets_their_id_back_quickly():
+    tr = IdentityTracker(TrackingConfig())
+    for i in range(10):
+        tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
+    tr.lock()
+    play(tr, [(300, ALICE)], 0.5, seconds=0.5)
+    assert ids_by_x(play(tr, [(300, ALICE), (100, BOB)], 1.05, seconds=0.2)) == {1: 300, 2: 100}
+
+
+def test_player_leaving_during_enrolment_keeps_their_id_for_the_buffer():
+    tr = IdentityTracker(TrackingConfig())
+    for i in range(10):
+        tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
+    play(tr, [(300, ALICE)], 0.5, seconds=3.0)
+    assert ids_by_x(play(tr, [(300, ALICE), (100, STRANGER)], 3.55, seconds=1.0)) == {1: 300}
+    assert ids_by_x(play(tr, [(300, ALICE), (100, BOB)], 4.6, seconds=0.2)) == {1: 300, 2: 100}
     assert tr.reassigned == set()
 
 

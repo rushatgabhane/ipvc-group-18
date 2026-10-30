@@ -49,13 +49,15 @@ idle ──(2 players visible)──► countdown (3 s) ──► duel ──(so
   Hungarian assignment (`linear_sum_assignment`). A body can only be matched to a slot if it moved
   less than `max_match_distance = 0.25 W` since the last frame.
 - New bodies take free slots in order from left to right.
-- **Enrolment:** until the duel starts, a slot is released after `lost_timeout_s = 1.5` s without a
-  matching body, and whoever claims it next starts fresh. Meanwhile each slot collects its player's
+- A body is followed by position only while it stays in view (gaps up to `1.5` s, e.g. ducking). A
+  player who was out of view longer gets their slot back by face (below).
+- **Enrolment:** until the duel starts, a slot is kept for `lost_timeout_s = 5` s after its player
+  leaves (they can come back to it by face), then released, and whoever claims it next starts fresh. Meanwhile each slot collects its player's
   face embeddings (OpenCV SFace, 128-d, from a face aligned on the face mesh's eyes, nose and mouth;
-  only frontal faces with eyes at least 18 px apart).
+  only faces turned less than about 30° with eyes at least 18 px apart).
 - **Locked ids:** once the duel starts, slots are never released. A player who leaves keeps their slot
-  and gets it back only when a new body's face matches theirs (mean cosine similarity `≥ 0.4` over at
-  least 2 embeddings and `0.15` s) and beats every other player's by `0.1`. Until then the body gets no
+  and gets it back only when a new body's face matches theirs (mean cosine similarity `≥ 0.36` over
+  their latest 2–3 embeddings, seen for `0.15` s) and beats every other player's by `0.1`. Until then the body gets no
   id, so a third person never gets one, even when a player is away. Identity is decided by face only:
   someone whose face cannot be seen waits without an id until it can.
 - **Face check:** a body tracked by position whose face keeps scoring below `0.2` against the slot's
