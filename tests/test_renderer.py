@@ -8,6 +8,7 @@ from highnoon.game.actions import PlayerActions
 from highnoon.game.entities import PlayerState
 from highnoon.game.game import Game
 from highnoon.render.face_damage import UV
+from highnoon.render.face_fx import FaceEffectRenderer
 from highnoon.render.renderer import Renderer
 
 WIDTH, HEIGHT = 1280, 720
@@ -37,9 +38,18 @@ def test_a_face_above_the_wall_gets_its_effects():
     assert np.any(picture(make_face(WALL_TOP - 300.0)) != picture(None))
 
 
+def hat_rise() -> int:
+    """How far the hat reaches above the top of the face."""
+    canvas = np.zeros((2000, 2000, 3), np.uint8)
+    FaceEffectRenderer().draw(canvas, make_face(1000.0))
+    return 1000 - int(np.flatnonzero(canvas.any(axis=(1, 2))).min())
+
+
 def test_a_face_behind_the_wall_shows_nothing():
     # Low enough that the top of the hat, which rises above the face, is behind the wall too.
-    assert np.array_equal(picture(make_face(WALL_TOP + 130.0)), picture(None))
+    top = WALL_TOP + hat_rise() + 1
+    assert top < HEIGHT, "the face must still be on screen for this test to mean anything"
+    assert np.array_equal(picture(make_face(top)), picture(None))
 
 
 def test_a_face_crossing_the_wall_is_cut_off_at_its_top_edge():
