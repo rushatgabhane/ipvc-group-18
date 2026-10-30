@@ -259,6 +259,10 @@ The game starts at `max_hp = 100`. When a player fires, the weapon is chosen in 
 - **Drawing rate:** the game is drawn at `render_hz = 60` even on a 30 fps camera. Between camera
   frames the game clock is advanced (by at most 0.1 s past the last frame) and the scene is redrawn,
   so projectiles and effects move smoothly. Perception still runs once per camera frame.
+- **Webcam inset:** a small view of the raw, mirrored camera picture (`14%` of the screen height) sits
+  on the wall, centred between the two player cards, so the input can be compared with the game's
+  output. It updates once per camera frame and is hidden while the debug overlay is on, because the
+  stats panel uses the same spot.
 - **Debug overlay (`d`):** the skeleton, the live signal values against their thresholds (palm length,
   elevation, hand openness, aim, head position), and the reason for the last ignored fist.
 
