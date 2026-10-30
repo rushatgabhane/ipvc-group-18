@@ -283,8 +283,14 @@ ignored fists by reason. Practice mode does not write this log.
 
 ## 6b. Scenery (`render/scenery.py`)
 
-The background is always a daytime desert. These effects only change the picture; none of them
-affect the rules.
+These effects only change the picture; none of them affect the rules.
+
+- **Sunset:** during a round the sky moves gradually from midday to sunset over `SUNSET_AFTER_S = 60`
+  s, then stays at sunset (it never gets to night). It is a keyframe animation: five skies from
+  midday to sunset are drawn once, and the current one is a cross-fade of the two nearest, updated in
+  120 small steps, so the change is never noticeable from one moment to the next. The sun sinks and
+  reddens, the land and the wall warm up. Outside the duel and at the start of the next round it
+  fades back to midday at 0.5 per second.
 
 - **Wall damage:** a bullet that is BLOCKED by the wall leaves a bullet hole with splinters where it
   hit. An explosion scorches the wall, and one near the top edge also burns a charred notch into
