@@ -1,6 +1,8 @@
 # HIGH NOON: Game mechanics
 
-This describes the game as of commit `3a83e02` ("Show FIGHT! with the announcer; declutter on-screen text").
+This describes the game as of commit `f126045` ("moved the structure"), which adds practice mode,
+the scenery damage and dusk, the vultures and the face hat to what was there at `3a83e02`, plus
+the facial degradation (section 6c) added on top of it.
 Every number comes from `GameConfig` in `highnoon/config.py` or from a constant in the module named
 next to it. Distances given as a fraction of the screen use the frame height `H` or width `W` in the
 mirrored camera frame.
@@ -14,6 +16,9 @@ HIGH NOON is a two-player duel played in front of one webcam. Each player:
 - ducks behind a wall that covers the bottom 25% of the screen to dodge shots and to reload.
 
 The first player to reach 0 HP loses the round. Wins are counted per player for the whole session.
+
+There is also a solo **practice mode** (`--practice`, section 9) for testing the controls: one
+player shoots bottles instead of an opponent.
 
 ## 2. Game flow (`highnoon/game/game.py`)
 
@@ -219,6 +224,7 @@ The game starts at `max_hp = 100`. When a player fires, the weapon is chosen in 
   - floating damage numbers
   - BLOCKED and SAFE!
   - explosions with particles and screen shake
+  - the scenery, vultures, facial damage and hat described in sections 6b and 6c
 - **Sound** (`render/sound.py`, `--mute` turns it off): recorded effects for the revolver, rocket
   launch, grenade throw, explosion, reload, dry-fire click and the 3-2-1 click, plus announcer
   voices for "FIGHT!" and "K.O.". Credits are in `assets/CREDITS.md`.
@@ -239,7 +245,86 @@ winner, duration, fps, latency/inference/render timings (mean and p95), and per-
 bullet hits, headshots, accuracy, rockets, grenades, damage dealt, camping damage taken, blocked
 shots, powerups, reloads, dry fires, ducks, time ducked, time aiming, the share of aiming time with a
 tracked hand, fists (with how many fell in cooldown and the share that fired) and the counts of
-ignored fists by reason.
+ignored fists by reason. Practice mode does not write this log.
+
+## 6b. Scenery and ambient effects (`render/scenery.py`, `render/wildlife.py`)
+
+These only change the picture; none of them affect the rules.
+
+- **Wall damage:** a bullet that is BLOCKED by the wall leaves a bullet hole with splinters where it
+  hit. An explosion scorches the wall, and one near the top edge also burns a charred notch into
+  it. A shattered bottle scatters glass on the wall's top rail. All of it is cleared when a new
+  round starts.
+- **Ground damage:** an explosion scorches the desert behind the players and leaves a crater in the
+  sand. This only shows with the background replacement on (`b`). It is also cleared each round.
+- **Dusk:** during a duel the sky moves from midday towards sunset, and the wall darkens with it.
+  The target is the larger of (time since the round started ÷ 90 s) and (the HP lost by the most
+  hurt player ÷ max HP). The sky eases towards it at 0.4 per second and goes back to day outside
+  the duel.
+- **Vultures:** when a visible player is at or below `35%` of max HP during a duel, three vultures
+  fade in near the top of the screen and circle above the weakest such player, following them
+  sideways. They fade out over 1 s once nobody is that low.
+
+## 6c. Face effects (`render/face_damage.py`, `render/face_fx.py`)
+
+Face tracking uses Google's **MediaPipe Face Landmarker** (`models/face_landmarker.task`, float16),
+not a custom model. It runs in VIDEO (tracking) mode for up to `max_players` faces and gives 478
+points per face: 468 for the face mesh and 10 for the irises. The expression (blendshape) output is
+not enabled.
+
+The effects are drawn on top of the wall, because the face is still tracked behind it. A ducked
+player's hat and marks therefore show on the wall wherever their face is. Everything else in the
+scene (vultures, weapons and projectiles, HUD) is drawn over the face effects.
+
+### Facial degradation
+
+The face picks up cartoon damage as HP drops. The look depends only on current HP, so it builds up
+from any kind of damage (bullets, rocket splash, grenades, camping, bombs) and is gone when HP is
+reset for the next round.
+
+| HP | Marks |
+|---|---|
+| 100–76 | none |
+| 75–51 | soot smudges on one cheek and on the jaw |
+| 50–26 | adds a purple bruise under one eye and a stitched red cut on that cheek |
+| 25–0 | adds a black eye on the other side, a crossed plaster on the nose bridge and a pale green tint (22% opacity) over the whole face |
+
+- **Hit flash:** all damage also tints the face red, including each camping drain tick. The tint
+  starts at 45% opacity and fades over `0.25` s (the same time as the HUD card flash).
+- **Cartoon style:** flat colours with dark outlines, drawn at 90% opacity, so the marks stay
+  readable on a low-quality camera.
+- **Follows the head:** each mark is defined in a small frame built from nearby landmarks (the eye
+  corners, lower lid and cheek for the eyes and cheeks; the nose bridge, inner eye corners and
+  nose tip for the plaster). The marks move, scale, tilt and squash with the face as the head
+  turns or nods.
+- **Turning away:** when one eye looks less than `45%` as wide as the other, that side is turned
+  away, and its marks are hidden. The plaster and the tints are always drawn.
+- **Sides:** Player 1 is bruised under the left eye of the image and Player 2 under the right, so
+  the two players look different.
+- **Skipped when:** no face is detected, or the face is less than 24 px wide.
+- **Cost:** about 0.1 ms per face at the first stage and up to about 0.45 ms at the last stage with
+  a hit flash. Only the area around the face is blended.
+
+### Hat
+
+The landmarks are also used for a **cowboy hat** in the player's colour, drawn on top of the
+facial damage.
+
+- **Where:** it is drawn for every visible player whose face is detected, in every mode (idle,
+  countdown, duel, practice). It sits on the top edge of the face box, `1.1 ×` the face width
+  wide, and is drawn at 90% opacity under the name tag and HP bar.
+- **Tilt:** the hat is rotated by the head roll, measured as the angle of the line between the two
+  iris centres (landmarks 468 and 473).
+- **No effect on play:** the hat lies inside the head hitbox (section 5.1), so shooting it counts as
+  a headshot, but it adds nothing to the hitbox.
+- **When it is missing:** no face detected (the head hitbox then uses the nose), or a face box
+  smaller than 8 px.
+
+The facial degradation and the hat are the only effects drawn from face landmarks. The other
+effects around a player's head or body (the name tag and HP bar, the red flash of the HUD card,
+`-N` damage numbers, HEADSHOT!, the camping drain and the vultures) come from the face box or the
+pose. Like the facial degradation, most of them need the player to take damage (see section 9 for
+why that only happens through bombs in practice mode).
 
 ## 7. Tunables at a glance (`GameConfig`)
 
@@ -258,6 +343,8 @@ ignored fists by reason.
 | Powerups | `powerup_interval_s`, `powerup_fall_s`, `powerup_radius`, `powerup_hit_scale`, `powerup_center_spread` | 15 s, 5 s, 0.08, 1.3, 0.05 |
 | Rocket | `rocket_speed`, `rocket_gravity`, `rocket_blast_radius`, `rocket_damage`, `rocket_min_damage` | 1.6, 1.3, 0.16, 50, 20 |
 | Grenade | `grenade_flight_s`, `grenade_arc` | 1.4 s, 0.45 |
+| Practice | `practice_powerup_interval_s`, `bomb_damage` | 10 s, 25 |
+| Bottles | `bottle_count`, `bottle_radius`, `bottle_respawn_s` | 4, 0.06 (x H), 0.6 s |
 
 ## 8. Behaviour worth knowing
 
@@ -274,3 +361,41 @@ These follow from the code but are easy to miss:
   running.
 - **Re-tracking resets a player.** If a slot is lost for more than 1.5 s and claimed again, that
   player restarts with full HP and ammo, even in the middle of a round.
+
+## 9. Practice mode (`--practice`)
+
+A solo target range for trying the controls. Run it with
+`python -m highnoon --practice`. It uses the same aiming, firing, ducking, reloading and recoil as
+the duel; only the targets change.
+
+- **Setup:** only one person is detected (`max_players = 1`), and the games CSV is not written.
+- **Flow:** the idle screen says "PRACTICE / STEP INTO VIEW". One visible player starts the 3-2-1
+  countdown, then "FIGHT!" and the live round, exactly as in the duel.
+- **Bottles:** up to `bottle_count = 4` green bottles stand in the air above the wall, at random
+  positions between 8% and 92% of the width and 12% and 90% of the wall height, at least three
+  bottle radii apart. Each has radius `0.06 H`. A bullet or a rocket blast that reaches one
+  shatters it (green glass, "+1", glass on the wall). Missing bottles reappear together
+  `bottle_respawn_s = 0.6` s after the last one broke.
+- **Score:** each bottle is worth one point, shown as "n BOTTLES" on the player card. The count
+  carries over between rounds.
+- **Powerups:** every `10` s, either a **ROCKET LAUNCHER** or a **BOMB** (red) drops, using the same
+  fall as in the duel. Grenades are never dropped, and could not be thrown anyway because there is
+  no opponent.
+- **Bombs:** shooting the bomb, or hitting it with a rocket, sets it off where it was hit and costs
+  the shooter `bomb_damage = 25` HP. The bomb's own explosion does not break bottles (a rocket's
+  does). The fourth bomb takes the player to 0 HP: the round ends with "BLOWN UP / DON'T SHOOT THE
+  BOMBS", no win is scored, and a new countdown starts after 5 s.
+- **What is switched off:** the player is never a target. Bullets and rocket blasts pass through
+  them, there is no opponent for the camping drain (the GET UP! warnings still appear), and there
+  are no grenades.
+
+**Why damage effects only come from bombs in practice mode.** Practice mode removes the player
+from every hit test (`self.cfg.practice` checks in `_hit_fractions` and `_explode` in `game.py`),
+and `_opponent_of()` returns `None`. So no bullet, rocket, grenade or camping drain can hurt them.
+The player effects that react to damage only appear after the player shoots bombs. These are the
+red face and HUD-card flash, the `-N` numbers on the body, the facial degradation, the dusk caused
+by lost HP and the vultures at 35 HP or less. Each bomb (25 HP) moves the face exactly one
+degradation stage, and the third bomb also brings the vultures. HEADSHOT! never appears in
+practice. The hat does not depend on damage, so it is always drawn. The scenery
+effects (bullet holes, scorch marks, glass on the rail) do appear in practice whenever the player
+hits the wall, fires a rocket or breaks a bottle.

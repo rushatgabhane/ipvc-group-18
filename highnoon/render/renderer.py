@@ -8,13 +8,14 @@ from highnoon.contracts import Perception, Player
 from highnoon.core.profiler import Profiler
 from highnoon.game.game import Game
 from highnoon.render import assets
+from highnoon.render.face_damage import draw_face_damage
+from highnoon.render.face_fx import FaceEffectRenderer
 from highnoon.render.fx import FX
 from highnoon.render.hud import Hud, draw_signal_debug
 from highnoon.render.palette import PLAYER_COLORS, WHITE
 from highnoon.render.scenery import Scenery
 from highnoon.render.wildlife import Wildlife
 from highnoon.render.world import WorldView
-from highnoon.render.face_fx import FaceEffectRenderer
 
 TORSO_BONES = [(11, 12), (11, 23), (12, 24), (23, 24)]
 ARM_BONES = [(11, 13), (13, 15), (12, 14), (14, 16)]
@@ -38,7 +39,6 @@ class Renderer:
         self.wildlife = Wildlife()
         self.shake = (0, 0)
         self._t_last: float | None = None
-        
 
     def render(
         self, perception: Perception, players: list[Player], game: Game, profiler: Profiler
@@ -68,9 +68,13 @@ class Renderer:
         image = self._base.copy()
 
         for player in players:
-                    if player.visible and player.face is not None:
-                        color = PLAYER_COLORS.get(player.id, WHITE)
-                        self.face_fx.draw(image, player.face, color)
+            if player.visible and player.face is not None:
+                state = game.states.get(player.id)
+                if state is not None:
+                    hp_fraction = state.hp / game.cfg.max_hp
+                    draw_face_damage(image, player.face, player.id, hp_fraction, t - state.last_hit_t)
+                color = PLAYER_COLORS.get(player.id, WHITE)
+                self.face_fx.draw(image, player.face, color)
 
         self.fx.update(t, game.effects)
         self.wildlife.draw(image, game, players, t, dt)
