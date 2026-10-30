@@ -22,8 +22,8 @@ from highnoon.game.geometry import ray_exit_distance, rect_polygon, segment_circ
 
 NOSE = 0
 TORSO_CORNERS = [11, 12, 24, 23]
-POWERUP_KINDS = ("rocket", "grenade")
 PRACTICE_POWERUP_KINDS = ("rocket", "bomb")
+GRENADE_EXPLOSION_SCALE = 1.4
 EFFECT_LIFETIME_S = 0.8
 HEAD_RADIUS_PER_FACE = 0.6
 HEAD_RADIUS_PER_TORSO = 0.35
@@ -33,7 +33,6 @@ ROCKET_MAX_FLIGHT_S = 4.0
 ARC_PREVIEW_STEP_S = 0.04
 LOB_PREVIEW_STEPS = np.linspace(0.0, 1.0, 25, dtype=np.float32)
 ARC_PREVIEW_STEPS = 60
-GRENADE_BLAST_SCALE = 1.4
 
 
 class Game:
@@ -140,7 +139,11 @@ class Game:
             self.mode = "duel"
 
     def blast_radius(self, grenade: bool = False) -> float:
-        return self.cfg.rocket_blast_radius * self.height * (GRENADE_BLAST_SCALE if grenade else 1.0)
+        return (self.cfg.grenade_blast_radius if grenade else self.cfg.rocket_blast_radius) * self.height
+
+    def explosion_radius(self, grenade: bool = False) -> float:
+        """The size the fireball and scorch marks are drawn at, which is smaller than a grenade's reach."""
+        return self.cfg.rocket_blast_radius * self.height * (GRENADE_EXPLOSION_SCALE if grenade else 1.0)
 
     def reset_round(self) -> None:
         for state in self.states.values():
@@ -215,7 +218,7 @@ class Game:
             return
         if weapon == "grenade":
             state.grenades -= 1
-            self._throw_grenade(shooter, opponent, origin, t)
+            self._throw_grenade(shooter, opponent, origin, shot.direction, t)
         elif weapon == "rocket":
             state.rockets -= 1
             velocity, gravity = self._rocket_launch(shot.direction)
@@ -293,11 +296,21 @@ class Game:
         segment, impact, what = hit
         return np.vstack([path[: segment + 1], impact]), what
 
-    def _grenade_landing(self, player: Player) -> np.ndarray:
-        return self._hitboxes[player.id].head_center.copy()
+    def _grenade_landing(self, thrower: int, origin: np.ndarray, direction: np.ndarray) -> np.ndarray:
+        """Where the aim line first meets the wall or another player, or else leaves the screen."""
+        reach = ray_exit_distance(origin, direction, self.width, self.height)
+        start, end = origin[None, :], (origin + direction * reach)[None, :]
+        fractions = [1.0, float(segment_polygon_hits(start, end, self._wall)[0])]
+        for player_id, box in self._hitboxes.items():
+            if player_id != thrower:
+                fractions.append(float(segment_circle_hits(start, end, box.head_center, box.head_radius)[0]))
+                fractions.append(float(segment_polygon_hits(start, end, box.torso)[0]))
+        return (origin + direction * reach * min(fractions)).astype(np.float32)
 
-    def _throw_grenade(self, thrower: int, target: Player, origin: np.ndarray, t: float) -> None:
-        landing = self._grenade_landing(target)
+    def _throw_grenade(
+        self, thrower: int, target: Player, origin: np.ndarray, direction: np.ndarray, t: float
+    ) -> None:
+        landing = self._grenade_landing(thrower, origin, direction)
         flight_end = t + self.cfg.grenade_flight_s
         self.grenades.append(Grenade(thrower, target.id, origin, t, flight_end, origin.copy(), landing))
         self.effects.append(Effect("grenade", landing, t, thrower))
@@ -305,9 +318,6 @@ class Game:
     def _update_grenades(self, t: float) -> None:
         in_flight = []
         for grenade in self.grenades:
-            target = self._players.get(grenade.target)
-            if target is not None and target.id in self._hitboxes:
-                grenade.landing = self._grenade_landing(target)
             progress = grenade.progress(t)
             grenade.pos = self.lob_path(grenade.origin, grenade.landing, np.array([progress], np.float32))[0]
             if progress < 1.0:
@@ -318,13 +328,22 @@ class Game:
 
     def _detonate_grenade(self, grenade: Grenade, t: float) -> None:
         self.effects.append(Effect("explosion", grenade.pos.copy(), t, grenade.thrower, detail="grenade"))
-        state = self.states.get(grenade.target)
-        if state is None or not self.round_live:
-            return
-        if state.frame.ducked:
-            self.effects.append(Effect("safe", grenade.pos.copy(), t, grenade.thrower))
-        else:
-            self._damage(grenade.thrower, grenade.target, state.hp, "hit", grenade.pos.copy(), t, "grenade")
+        cfg, radius = self.cfg, self.blast_radius(grenade=True)
+        # The target goes first, so a blast that catches both gives the round to the thrower. Splash on
+        # the thrower counts as damage from the opponent, so blowing yourself up loses the round.
+        for player_id, credited in ((grenade.target, grenade.thrower), (grenade.thrower, grenade.target)):
+            box = self._hitboxes.get(player_id)
+            if box is None or not self.round_live:
+                continue
+            distance = distance_to_hitbox(grenade.pos, box)
+            if distance > radius:
+                continue
+            if self.states[player_id].frame.ducked:
+                if player_id == grenade.target:
+                    self.effects.append(Effect("safe", grenade.pos.copy(), t, grenade.thrower))
+                continue
+            damage = splash_damage(distance, radius, cfg.grenade_damage, cfg.grenade_min_damage)
+            self._damage(credited, player_id, damage, "hit", box.torso.mean(axis=0), t, "grenade")
 
     def _explode(self, shooter: int, center: np.ndarray, t: float) -> None:
         self.effects.append(Effect("explosion", center, t, shooter))
@@ -337,8 +356,7 @@ class Game:
                 continue
             distance = distance_to_hitbox(center, box)
             if distance <= radius:
-                falloff = (self.cfg.rocket_damage - self.cfg.rocket_min_damage) * distance / radius
-                damage = round(self.cfg.rocket_damage - falloff)
+                damage = splash_damage(distance, radius, self.cfg.rocket_damage, self.cfg.rocket_min_damage)
                 self._damage(shooter, player_id, damage, "hit", box.torso.mean(axis=0), t, "rocket")
 
     def _damage(
@@ -423,9 +441,10 @@ class Game:
             muzzle = self.muzzle(origin, direction, weapon)
             spread = state.frame.spread_deg
             if weapon == "grenade":
-                landing = self._grenade_landing(opponent)
+                landing = self._grenade_landing(player.id, muzzle, direction)
                 path = self.lob_path(muzzle, landing, LOB_PREVIEW_STEPS)
-                self.aims[player.id] = Aim(origin, landing, True, path, spread, direction, weapon)
+                in_blast = distance_to_hitbox(landing, self._hitboxes[opponent.id]) <= self.blast_radius(True)
+                self.aims[player.id] = Aim(origin, landing, in_blast, path, spread, direction, weapon)
             elif weapon == "rocket":
                 path, (kind, target) = self._predict_arc(player.id, muzzle, direction)
                 lands_on_player = kind in ("head", "body", "powerup", "bottle") or (
@@ -457,8 +476,10 @@ class Game:
         spread = self.cfg.powerup_center_spread
         start = np.array([rng.uniform(0.5 - spread, 0.5 + spread) * self.width, -radius], np.float32)
         velocity = np.array([0.0, (self.wall_top + radius) / fall_s], np.float32)
-        kinds = PRACTICE_POWERUP_KINDS if self.cfg.practice else POWERUP_KINDS
-        kind = kinds[int(rng.integers(len(kinds)))]
+        if self.cfg.practice:
+            kind = PRACTICE_POWERUP_KINDS[int(rng.integers(len(PRACTICE_POWERUP_KINDS)))]
+        else:
+            kind = "grenade" if rng.random() < self.cfg.grenade_drop_chance else "rocket"
         return Powerup(kind, start, velocity, 0.0, radius, t, t + fall_s)
 
     def _update_bottles(self, t: float) -> None:
@@ -520,6 +541,10 @@ def hitbox(player: Player) -> Hitbox:
     middle = corners.mean(axis=0)
     torso = middle + (corners - middle) * TORSO_HITBOX_SCALE
     return Hitbox(head_center, head_radius, torso)
+
+
+def splash_damage(distance: float, radius: float, center_damage: int, edge_damage: int) -> int:
+    return round(center_damage - (center_damage - edge_damage) * distance / radius)
 
 
 def distance_to_hitbox(point: np.ndarray, box: Hitbox) -> float:

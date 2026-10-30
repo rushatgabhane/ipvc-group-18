@@ -29,6 +29,9 @@ GRADE_GAIN = (0.82, 0.96, 1.08)
 GRADE_CONTRAST = 0.25
 MAX_FRAME_STEP_S = 0.1
 STATS_SHOWN = ("latency", "inference", "pose", "face", "hand", "render")
+INSET_HEIGHT = 0.14
+INSET_MARGIN = 0.022
+INSET_BORDER = (20, 16, 14)
 
 
 def build_grade_lut() -> np.ndarray:
@@ -43,12 +46,12 @@ class Renderer:
         self.cfg = cfg
         self.text = assets.TextCache()
         self.fx = FX(PLAYER_COLORS)
-        self.face_fx = FaceEffectRenderer()
         preload_face_damage()
         self.world = WorldView(PLAYER_COLORS, self.text, self.fx)
         self.hud = Hud(PLAYER_COLORS, self.text, self.fx)
         self.scenery = Scenery()
         self._grade_lut = build_grade_lut()
+        self.face_fx = FaceEffectRenderer()
         self.shake = (0, 0)
         self._t_last: float | None = None
         self._mask: np.ndarray | None = None
@@ -76,6 +79,8 @@ class Renderer:
                     draw_skeleton(base, player)
         self._draw_wall(base)
         self._base = base
+        x0, y0, x1, y1 = inset_box(width, height, self.scenery.wall_top)
+        self._inset = cv2.resize(frame.image, (x1 - x0, y1 - y0), interpolation=cv2.INTER_AREA)
 
     def draw(
         self, perception: Perception, players: list[Player], game: Game, profiler: Profiler, t: float
@@ -84,6 +89,8 @@ class Renderer:
         self._t_last = t
         image = self._base.copy()
 
+        # Faces are still tracked behind the wall, so their effects only get the picture above it.
+        above_wall = image[: self.scenery.wall_top]
         columns = player_columns(players)
         for player in players:
             state = game.states.get(player.id)
@@ -103,12 +110,14 @@ class Renderer:
                     face = player.face
                     if player.face_smoothed is not None:
                         face = FaceObservation(player.face_smoothed, face.bbox)
-                    draw_face_damage(image, face, player.id, hp_fraction, t - state.last_hit_t)
+                    draw_face_damage(above_wall, face, player.id, hp_fraction, t - state.last_hit_t)
                 color = PLAYER_COLORS.get(player.id, WHITE)
-                self.face_fx.draw(image, player.face, color)
+                self.face_fx.draw(above_wall, player.face, color)
 
         self.fx.update(t, game.effects)
         self.world.draw(image, game, t, dt)
+        if not self.cfg.show_debug:  # the debug stats panel sits in the same spot
+            self._draw_inset(image)
         self.hud.draw(image, game, players, t, dt)
 
         if self.cfg.show_debug:
@@ -122,6 +131,12 @@ class Renderer:
         above_wall = image[scenery.wall_top - scenery.shadow.shape[0] : scenery.wall_top]
         cv2.multiply(above_wall, scenery.shadow, dst=above_wall, scale=1 / 255)
         image[scenery.wall_top :] = scenery.wall
+
+    def _draw_inset(self, image: np.ndarray) -> None:
+        """The raw camera picture, small, on the wall between the player cards."""
+        x0, y0, x1, y1 = inset_box(image.shape[1], image.shape[0], self.scenery.wall_top)
+        image[y0:y1, x0:x1] = self._inset
+        cv2.rectangle(image, (x0 - 2, y0 - 2), (x1 + 1, y1 + 1), INSET_BORDER, 2)
 
     def _camera_layer(self, camera: np.ndarray, mask: np.ndarray | None) -> np.ndarray:
         graded = self.cfg.grade
@@ -137,6 +152,14 @@ class Renderer:
         cv2.threshold(person, 0.0, 0.0, cv2.THRESH_TOZERO, dst=person)
         cv2.erode(person, ERODE_KERNEL, dst=person)
         return cv2.blendLinear(camera, self.scenery.background, person, 1.0 - person)
+
+
+def inset_box(width: int, height: int, wall_top: int) -> tuple[int, int, int, int]:
+    margin = round(INSET_MARGIN * height)
+    inset_h = min(round(INSET_HEIGHT * height), height - wall_top - 2 * margin)
+    inset_w = round(inset_h * width / height)
+    x0, y0 = (width - inset_w) // 2, height - margin - inset_h
+    return x0, y0, x0 + inset_w, y0 + inset_h
 
 
 def draw_skeleton(image: np.ndarray, player: Player) -> None:

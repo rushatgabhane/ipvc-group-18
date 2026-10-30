@@ -21,6 +21,8 @@ class CaptureConfig:
 @dataclass
 class PerceptionConfig:
     max_players: int = 2
+    # Bystanders are detected too, so a third person is seen (and refused an id) rather than hiding a player.
+    extra_people: int = 1
     max_hands: int = 4
     delegate: str = "auto"
     min_detection_confidence: float = 0.5
@@ -29,6 +31,8 @@ class PerceptionConfig:
     pose_model_path: Path = MODELS_DIR / "pose_landmarker_lite.task"
     face_model_path: Path = MODELS_DIR / "face_landmarker.task"
     hand_model_path: Path = MODELS_DIR / "hand_landmarker.task"
+    face_id_model_path: Path = MODELS_DIR / "face_recognition_sface_2021dec.onnx"
+    face_id_every: int = 1
 
 
 @dataclass
@@ -42,12 +46,18 @@ class FilterConfig:
 @dataclass
 class TrackingConfig:
     max_match_distance: float = 0.25
-    lost_timeout_s: float = 1.5
-    reid_max_distance: float = 0.5
-    reid_margin: float = 0.05
+    lost_timeout_s: float = 5.0
+    # Past this, a missing player can only come back by face: a body near where they left could be anyone.
+    track_gap_s: float = 5.0
     reid_confirm_s: float = 0.15
-    reid_blend: float = 0.01
     enrol_max_samples: int = 90
+    face_accept: float = 0.36
+    face_reject: float = 0.2
+    face_margin: float = 0.1
+    face_min_samples: int = 2
+    face_gallery_size: int = 24
+    face_recent_size: int = 12
+    verify_confirm_s: float = 0.3
 
 
 @dataclass
@@ -92,6 +102,10 @@ class GameConfig:
     rocket_min_damage: int = 20
     grenade_flight_s: float = 1.4
     grenade_arc: float = 0.45
+    grenade_blast_radius: float = 0.5
+    grenade_damage: int = 80
+    grenade_min_damage: int = 10
+    grenade_drop_chance: float = 0.25
     practice: bool = False
     practice_powerup_interval_s: float = 10.0
     bomb_damage: int = 25

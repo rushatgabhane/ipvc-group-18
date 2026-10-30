@@ -33,6 +33,7 @@ class PoseObservation:
 class FaceObservation:
     landmarks: np.ndarray
     bbox: np.ndarray
+    embedding: np.ndarray | None = None
 
     def center(self) -> np.ndarray:
         x0, y0, x1, y1 = self.bbox

@@ -17,6 +17,7 @@ POWERUP_TRAIL = ((3, 0.46), (2, 0.64), (1, 0.82))
 ROCKET_FLAME = ((44, 22, (20, 70, 140)), (36, 13, (40, 150, 255)), (30, 7, (180, 240, 255)))
 FIREBALL = ((1.0, (20, 60, 200)), (0.75, (30, 140, 255)), (0.45, (170, 235, 255)))
 MUZZLE_RINGS = ((46, 0.25), (30, 0.5), (16, 1.0))
+RETICLE_RADIUS = 14
 BULLET_LENGTH = 0.05
 BULLET_STREAK = 0.12
 BULLET_STREAK_WIDTH = 0.004
@@ -48,7 +49,7 @@ class WorldView:
         for player_id, aim in game.aims.items():
             color = self.colors.get(player_id, WHITE)
             draw_weapon(image, game, aim, color, recoil(game, player_id, t))
-            self._draw_reticle(image, aim, color, t, scale)
+            self._draw_reticle(image, aim, color, scale)
 
     def _draw_bottle(self, image, bottle, t: float) -> None:
         sprite = assets.bottle_sprite(int(bottle.radius * 2.6))
@@ -110,7 +111,7 @@ class WorldView:
         for rocket in game.rockets:
             draw_rocket_flame(glow, rocket, t, scale)
         for blast in blasts:
-            draw_fireball(glow, blast, game.blast_radius(blast.detail == "grenade"), t)
+            draw_fireball(glow, blast, game.explosion_radius(blast.detail == "grenade"), t)
         for muzzle in muzzles:
             draw_muzzle_flash(glow, muzzle, t, scale)
         cv2.add(image, glow, dst=image)
@@ -133,7 +134,7 @@ class WorldView:
             if effect.kind != "explosion" or age >= EXPLOSION_S:
                 continue
             progress = age / EXPLOSION_S
-            radius = int(game.blast_radius(effect.detail == "grenade") * (0.3 + 1.2 * progress))
+            radius = int(game.explosion_radius(effect.detail == "grenade") * (0.3 + 1.2 * progress))
             thickness = max(1, int(10 * scale * (1 - progress)))
             cv2.circle(image, point(effect.pos), radius, CREAM, thickness, cv2.LINE_AA)
             if progress < 0.5:
@@ -150,24 +151,20 @@ class WorldView:
                 continue
             color = SAFE_GREEN if safe else RED
             center = point(grenade.landing)
+            blast = int(game.blast_radius(grenade=True))
+            cv2.circle(image, center, blast, color, max(1, int(2 * scale)), cv2.LINE_AA)
             radius = int((34 + 10 * math.sin(t * 14)) * scale)
             cv2.circle(image, center, radius + 2, BLACK, max(3, int(5 * scale)), cv2.LINE_AA)
             draw_crosshair(image, center, radius, color, t * 2, 0.5, 1.3, max(2, int(3 * scale)))
             label = self.text.get("SAFE" if safe else "DUCK!", int(46 * scale), color, TITLE_FONT, stroke=3)
             blit_center(image, label, center[0], center[1] - radius - 30 * scale)
 
-    def _draw_reticle(self, image, aim, player_color, t: float, scale: float) -> None:
-        color = player_color
+    def _draw_reticle(self, image, aim, player_color, scale: float) -> None:
         center = point(aim.end)
-        pulse = 1 + 0.08 * math.sin(t * 12) if aim.on_target else 1.0
-        radius = int((20 if aim.on_target else 14) * scale * pulse)
+        radius = int(RETICLE_RADIUS * scale)
         cv2.circle(image, center, radius + 2, BLACK, 3, cv2.LINE_AA)
-        draw_crosshair(image, center, radius, color, t * (3.0 if aim.on_target else 1.0), 0.55, 1.45, 2)
-        cv2.circle(image, center, 2, color, -1, cv2.LINE_AA)
-        spread_px = int(np.linalg.norm(aim.end - aim.origin) * math.tan(math.radians(aim.spread_deg)))
-        if spread_px > radius:
-            cv2.circle(image, center, spread_px + 1, BLACK, 3, cv2.LINE_AA)
-            cv2.circle(image, center, spread_px, color, 2, cv2.LINE_AA)
+        draw_crosshair(image, center, radius, player_color, 0.0, 0.55, 1.45, 2)
+        cv2.circle(image, center, 2, player_color, -1, cv2.LINE_AA)
 
 
 def unit(vector: np.ndarray) -> np.ndarray:

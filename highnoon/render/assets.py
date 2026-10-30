@@ -377,38 +377,35 @@ class Daylight:
     land: tuple[float, float, float]
 
 
+# Key lighting from midday (0) to sunset (1); the sun sinks towards the mesas and everything warms up.
 DAYLIGHT_KEYS = (
     (
         0.0,
         Daylight((175, 120, 55), (150, 205, 245), 0.8, 0.2, (170, 240, 255), (60, 110, 120), (1.0, 1.0, 1.0)),
     ),
     (
-        0.4,
+        0.5,
         Daylight(
             (165, 110, 70), (115, 190, 250), 0.82, 0.33, (120, 220, 255), (40, 120, 200), (0.85, 0.95, 1.05)
         ),
     ),
     (
-        0.75,
-        Daylight((120, 65, 85), (80, 140, 250), 0.84, 0.47, (70, 150, 255), (30, 90, 230), (0.6, 0.68, 0.9)),
-    ),
-    (
         1.0,
-        Daylight((70, 35, 45), (95, 85, 170), 0.86, 0.56, (60, 110, 230), (40, 60, 160), (0.42, 0.42, 0.55)),
+        Daylight((120, 65, 85), (80, 140, 250), 0.84, 0.47, (70, 150, 255), (30, 90, 230), (0.6, 0.68, 0.9)),
     ),
 )
 
 
-def daylight(dusk: float) -> Daylight:
+def daylight(sunset: float) -> Daylight:
+    """The lighting `sunset` of the way from midday to sunset, interpolated between the key lightings."""
     stops = [stop for stop, _ in DAYLIGHT_KEYS]
-    fields = Daylight.__dataclass_fields__
     mixed = {}
-    for name in fields:
+    for name in Daylight.__dataclass_fields__:
         values = np.array([getattr(key, name) for _, key in DAYLIGHT_KEYS], np.float32)
         if values.ndim == 1:
-            mixed[name] = float(np.interp(dusk, stops, values))
+            mixed[name] = float(np.interp(sunset, stops, values))
         else:
-            mixed[name] = tuple(float(np.interp(dusk, stops, values[:, i])) for i in range(values.shape[1]))
+            mixed[name] = tuple(float(np.interp(sunset, stops, values[:, i])) for i in range(values.shape[1]))
     return Daylight(**mixed)
 
 
@@ -416,29 +413,14 @@ def tinted(color, tint) -> tuple[int, int, int]:
     return tuple(int(min(255, c * k)) for c, k in zip(color, tint, strict=True))
 
 
-def desert_background(width: int, height: int, seed: int = 7, dusk: float = 0.0) -> np.ndarray:
+def desert_background(width: int, height: int, seed: int = 7, sunset: float = 0.0) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    light = daylight(dusk)
+    light = daylight(sunset)
     image = sky_with_sun(width, height, light)
     horizon = int(height * HORIZON)
-    draw_mesa_ridge(
-        image,
-        rng,
-        horizon,
-        horizon - height * 0.05,
-        height * 0.16,
-        tinted((120, 150, 200), light.land),
-        height * 0.04,
-    )
-    draw_mesa_ridge(
-        image,
-        rng,
-        horizon,
-        horizon - height * 0.01,
-        height * 0.10,
-        tinted((70, 105, 165), light.land),
-        height * 0.03,
-    )
+    far, near = tinted((120, 150, 200), light.land), tinted((70, 105, 165), light.land)
+    draw_mesa_ridge(image, rng, horizon, horizon - height * 0.05, height * 0.16, far, height * 0.04)
+    draw_mesa_ridge(image, rng, horizon, horizon - height * 0.01, height * 0.10, near, height * 0.03)
     ground = sand(rng, width, height - horizon).astype(np.float32) * np.array(light.land, np.float32)
     image[horizon:] = np.clip(ground, 0, 255).astype(np.uint8)
     for x in (int(width * 0.12), int(width * 0.33), int(width * 0.9)):
@@ -447,7 +429,8 @@ def desert_background(width: int, height: int, seed: int = 7, dusk: float = 0.0)
     return image
 
 
-def sky_with_sun(width: int, height: int, light: Daylight) -> np.ndarray:
+def sky_with_sun(width: int, height: int, light: Daylight | None = None) -> np.ndarray:
+    light = light or daylight(0.0)
     t = np.linspace(0, 1, height, dtype=np.float32)[:, None, None]
     top, low = np.array(light.sky_top, np.float32), np.array(light.sky_low, np.float32)
     sky = (top + (low - top) * np.clip(t / 0.62, 0, 1) ** 1.3) * np.ones((1, width, 1), np.float32)

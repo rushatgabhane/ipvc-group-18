@@ -55,7 +55,7 @@ uv pip install -r requirements-dev.txt
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 
-# download model weights (~27 MB, verified by sha256)
+# download model weights (~54 MB, verified by sha256)
 .venv/bin/python tools/download_models.py
 ```
 
@@ -106,7 +106,7 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
   | Powerup | Effect |
   |---|---|
   | **ROCKET LAUNCHER** (orange) | Your next shot is a rocket on a ballistic arc (a dotted preview shows where it lands). It explodes on impact, and the blast reaches over the wall: 50 damage at the centre, 20 at the edge |
-  | **GRENADE** (green) | Your next shot lobs a grenade at your opponent, wherever they move. If they are not ducked when it lands 1.4 s later, they die |
+  | **GRENADE** (green) | Your next shot lobs a grenade to where you aim, landing 1.4 s later. The blast does 80 damage at the centre, fading to 10 at its wide edge, to anyone not ducked, including you if you are close. The target can duck or run from the marked spot. Rarer than the rocket: about 1 drop in 4 |
 
 All thresholds are in `GameConfig` (`highnoon/config.py`). With the debug overlay on (`d`), the live values the thresholds act on are shown under each
 player's face.

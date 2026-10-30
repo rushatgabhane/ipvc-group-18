@@ -13,6 +13,7 @@ from highnoon.config import PerceptionConfig
 from highnoon.contracts import FaceObservation, Frame, HandObservation, Perception, PoseObservation
 from highnoon.core.capture import FrameSource
 from highnoon.vision.delegate import resolve_delegate
+from highnoon.vision.face_id import FaceEmbedder
 
 FINGERTIPS = [8, 12, 16, 20]
 WRIST, MIDDLE_KNUCKLE = 0, 9
@@ -21,13 +22,14 @@ WRIST, MIDDLE_KNUCKLE = 0, 9
 class Perceiver:
     def __init__(self, cfg: PerceptionConfig):
         self.cfg = cfg
-        for path in (cfg.pose_model_path, cfg.face_model_path, cfg.hand_model_path):
+        for path in (cfg.pose_model_path, cfg.face_model_path, cfg.hand_model_path, cfg.face_id_model_path):
             if not path.exists():
                 raise FileNotFoundError(f"{path} missing - run: python tools/download_models.py")
         delegate = resolve_delegate(cfg)
         self.pose = create_pose_landmarker(cfg, delegate)
         self.face = create_face_landmarker(cfg, delegate)
         self.hands = HandWorker(create_hand_landmarker(cfg, delegate))
+        self.face_id = FaceEmbedder(cfg.face_id_model_path)
         self._pose_thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pose")
 
     def __call__(self, frame: Frame) -> Perception:
@@ -46,13 +48,18 @@ class Perceiver:
         t_infer = time.perf_counter()
         pose_future = self._pose_thread.submit(detect, "pose", self.pose)
         face_result = detect("face", self.face)
+        width, height = frame.size
+        faces = convert_faces(face_result, width, height)
+        if frame.id % self.cfg.face_id_every == 0:
+            started = time.perf_counter()
+            for face in faces:
+                face.embedding = self.face_id(frame.image, face)
+            timings["face_id"] = elapsed_ms(started)
         pose_result = pose_future.result()
         timings["inference"] = elapsed_ms(t_infer)
 
         t_post = time.perf_counter()
-        width, height = frame.size
         poses = convert_poses(pose_result, width, height)
-        faces = convert_faces(face_result, width, height)
         mask = merge_person_masks(pose_result)
         hands, timings["hand"] = self.hands.latest()
         timings["hand_lag"] = float(frame.id - hands[0].frame_id) if hands else 0.0
@@ -79,7 +86,7 @@ def create_pose_landmarker(cfg: PerceptionConfig, delegate):
         vision.PoseLandmarkerOptions(
             base_options=base_options(cfg.pose_model_path, delegate),
             running_mode=vision.RunningMode.VIDEO,
-            num_poses=cfg.max_players,
+            num_poses=cfg.max_players + cfg.extra_people,
             min_pose_detection_confidence=cfg.min_detection_confidence,
             min_pose_presence_confidence=cfg.min_presence_confidence,
             min_tracking_confidence=cfg.min_tracking_confidence,
@@ -93,7 +100,7 @@ def create_face_landmarker(cfg: PerceptionConfig, delegate):
         vision.FaceLandmarkerOptions(
             base_options=base_options(cfg.face_model_path, delegate),
             running_mode=vision.RunningMode.VIDEO,
-            num_faces=cfg.max_players,
+            num_faces=cfg.max_players + cfg.extra_people,
             min_face_detection_confidence=cfg.min_detection_confidence,
             min_face_presence_confidence=cfg.min_presence_confidence,
             min_tracking_confidence=cfg.min_tracking_confidence,
