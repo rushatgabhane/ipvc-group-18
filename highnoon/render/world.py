@@ -17,6 +17,7 @@ POWERUP_TRAIL = ((3, 0.46), (2, 0.64), (1, 0.82))
 ROCKET_FLAME = ((44, 22, (20, 70, 140)), (36, 13, (40, 150, 255)), (30, 7, (180, 240, 255)))
 FIREBALL = ((1.0, (20, 60, 200)), (0.75, (30, 140, 255)), (0.45, (170, 235, 255)))
 MUZZLE_RINGS = ((46, 0.25), (30, 0.5), (16, 1.0))
+RETICLE_RADIUS = 14
 BULLET_LENGTH = 0.05
 BULLET_STREAK = 0.12
 BULLET_STREAK_WIDTH = 0.004
@@ -45,7 +46,7 @@ class WorldView:
         for player_id, aim in game.aims.items():
             color = self.colors.get(player_id, WHITE)
             draw_weapon(image, game, aim, color)
-            self._draw_reticle(image, aim, color, t, scale)
+            self._draw_reticle(image, aim, color, scale)
 
     def _draw_bottle(self, image, bottle, t: float) -> None:
         sprite = assets.bottle_sprite(int(bottle.radius * 2.6))
@@ -155,18 +156,12 @@ class WorldView:
             label = self.text.get("SAFE" if safe else "DUCK!", int(46 * scale), color, TITLE_FONT, stroke=3)
             blit_center(image, label, center[0], center[1] - radius - 30 * scale)
 
-    def _draw_reticle(self, image, aim, player_color, t: float, scale: float) -> None:
-        color = player_color
+    def _draw_reticle(self, image, aim, player_color, scale: float) -> None:
         center = point(aim.end)
-        pulse = 1 + 0.08 * math.sin(t * 12) if aim.on_target else 1.0
-        radius = int((20 if aim.on_target else 14) * scale * pulse)
+        radius = int(RETICLE_RADIUS * scale)
         cv2.circle(image, center, radius + 2, BLACK, 3, cv2.LINE_AA)
-        draw_crosshair(image, center, radius, color, t * (3.0 if aim.on_target else 1.0), 0.55, 1.45, 2)
-        cv2.circle(image, center, 2, color, -1, cv2.LINE_AA)
-        spread_px = int(np.linalg.norm(aim.end - aim.origin) * math.tan(math.radians(aim.spread_deg)))
-        if spread_px > radius:
-            cv2.circle(image, center, spread_px + 1, BLACK, 3, cv2.LINE_AA)
-            cv2.circle(image, center, spread_px, color, 2, cv2.LINE_AA)
+        draw_crosshair(image, center, radius, player_color, 0.0, 0.55, 1.45, 2)
+        cv2.circle(image, center, 2, player_color, -1, cv2.LINE_AA)
 
 
 def unit(vector: np.ndarray) -> np.ndarray:

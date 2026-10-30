@@ -124,7 +124,7 @@ cancels the small hand movement that comes with closing the fist.
 - The spread recovers at about 16.7° per second, so it is back to 0 about `recoil_recovery_s = 1.2` s
   after the last shot.
 - The first shot after a pause is therefore exactly where you aim. Quick follow-up shots spread out.
-  The current spread is drawn as a ring around the reticle (rockets and grenades).
+  The reticle is a fixed-size crosshair; the spread is not drawn.
 
 ### 4.3 Ducking and cover
 
