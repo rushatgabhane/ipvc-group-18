@@ -1,76 +1,97 @@
 from __future__ import annotations
 
-import math
+from dataclasses import dataclass
+from functools import cache
 
 import cv2
 import numpy as np
 
 from highnoon.contracts import FaceObservation
+from highnoon.render.assets import ASSET_DIR, SPRITE_DIR
 
-# Cartoon damage drawn on the face as HP drops. Every mark is defined in a small frame spanned by
-# nearby landmarks, so it follows the face when the head moves, tilts or turns.
 STAGE_HP = (0.75, 0.5, 0.25)
 HIT_FLASH_S = 0.25
 MIN_FACE_PX = 24
-ROI_PAD = 0.25
-MARK_ALPHA = 0.9
-SICK_ALPHA = 0.22
-FLASH_ALPHA = 0.45
-TURNED_AWAY_RATIO = 0.45
+ROI_PAD = 0.05
 FACE_MESH_POINTS = 468
+WORK_FACE_PX = 110
+PALLOR = 0.2
+FLASH_TINT = np.array([0.55, 0.55, 1.0], np.float32)
+FLASH_STRENGTH = 0.4
+BASE_SIZE = 512
+TEXTURE_SIZE = 256
+SKIN_FEATHER = 0.025
+FACE_TINT_SHRINK = 0.92
+FACE_TINT_FEATHER = 0.05
+PAINTED_LEVEL = 3
+WHITE = (255, 255, 255)
+OCCLUDERS = 250
+TURNED = 0.12
+NOSE_TIP = 1
+FACE_SIDES = (234, 454)
 
-# (outer eye corner, inner eye corner, lower lid, cheek) for each side of the face
-EYE_SIDES = ((33, 133, 145, 50), (263, 362, 374, 280))
-NOSE = (6, 133, 362, 1)  # bridge, both inner eye corners, tip
+DECAL_DIR = SPRITE_DIR / "face"
 
-SOOT = (55, 60, 70)
-BRUISE, BRUISE_EDGE = (160, 60, 135), (90, 25, 75)
-SHINER, SHINER_EDGE = (70, 25, 60), (20, 10, 20)
-BLOOD, SCAR_EDGE = (40, 40, 215), (25, 20, 60)
-PLASTER, PLASTER_EDGE, PLASTER_PAD = (150, 200, 235), (40, 70, 110), (110, 160, 205)
-SICK = (150, 205, 170)
-FLASH = (60, 60, 255)
-
-BLOB_JITTER = np.array([1.0, 0.8, 1.1, 0.9, 1.15, 0.85, 1.0, 0.75, 1.1, 0.95, 1.2, 0.8, 1.0, 0.9])
-
-
-def ellipse(cx: float, cy: float, rx: float, ry: float, jitter=None, n: int = 24) -> np.ndarray:
-    angles = np.linspace(0, math.tau, n if jitter is None else len(jitter), endpoint=False)
-    scale = 1.0 if jitter is None else jitter
-    return np.stack([cx + rx * scale * np.cos(angles), cy + ry * scale * np.sin(angles)], axis=1)
-
-
-def strip(cx: float, cy: float, length: float, width: float, angle_deg: float) -> np.ndarray:
-    a = math.radians(angle_deg)
-    along, across = np.array([math.cos(a), math.sin(a)]), np.array([-math.sin(a), math.cos(a)])
-    corners = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
-    return np.array([[cx, cy] + along * length / 2 * i + across * width / 2 * j for i, j in corners])
+with np.load(ASSET_DIR / "face_mesh.npz") as _mesh:
+    UV, TRIANGLES = _mesh["uv"], _mesh["triangles"]
+NEAR = np.arange(len(TRIANGLES)) >= len(TRIANGLES) - OCCLUDERS
 
 
-_ARC = np.linspace(0, math.pi, 16)
-# Eye frame: origin between the eye corners, u = half the eye width pointing outwards,
-# v = lower lid to cheek (downwards).
-CHEEK_SOOT = ellipse(0.7, 1.0, 1.1, 0.4, BLOB_JITTER)
-CHEEK_SPECKS = [ellipse(x, y, 0.12, 0.05, n=8) for x, y in ((1.9, 0.8), (-0.2, 1.3), (1.6, 1.4))]
-JAW_SOOT = ellipse(0.1, 2.4, 0.7, 0.24, BLOB_JITTER[::-1])
-BRUISE_SHAPE = np.concatenate(
-    [
-        np.stack([1.35 * np.cos(_ARC), 0.12 + 0.5 * np.sin(_ARC)], axis=1),
-        np.stack([1.1 * np.cos(_ARC), 0.12 + 0.18 * np.sin(_ARC)], axis=1)[::-1],
-    ]
+@dataclass(frozen=True)
+class Decal:
+    image: str
+    anchor: tuple[int, ...]
+    offset: tuple[float, float]
+    size: tuple[float, float]
+    stage: int
+    strength: float = 1.0
+    angle_deg: float = 0.0
+
+
+# In UV units. Player 2 gets the texture mirrored.
+DECALS = (
+    Decal("blood_spray.png", (280,), (0.0, 0.03), (0.17, 0.12), 1),
+    Decal("shiner.png", (33, 133), (0.0, 0.012), (0.22, 0.18), 2),
+    Decal("blood_spray.png", (50,), (0.02, -0.01), (0.1, 0.07), 2, 1.0, -20),
+    Decal("blood_spray.png", (98,), (0.005, 0.045), (0.13, 0.05), 3, 1.6, 115),
 )
-SHINER_OUTER = ellipse(0.0, -0.05, 1.8, 0.6)
-SHINER_HOLE = ellipse(0.0, 0.0, 1.15, 0.22)
-CUT = np.array([[-0.2, 0.9], [0.3, 1.2], [0.8, 0.9], [1.3, 1.2], [1.8, 0.9]])
-STITCHES = [np.array([[u, 0.8], [u, 1.3]]) for u in (0.3, 0.8, 1.3)]
-# Nose frame: origin on the bridge, u = half the gap between the inner eye corners, v = bridge to tip.
-# The forehead is left alone because the hat covers most of it.
-PLASTER_STRIPS = [strip(0.0, 0.4, 1.6, 0.3, angle) for angle in (25, -25)]
-PLASTER_CENTER = ellipse(0.0, 0.4, 0.16, 0.07, n=10)
 
 
 def damage_stage(hp_fraction: float) -> int:
     return sum(hp_fraction <= level for level in STAGE_HP)
+
+
+def preload_face_damage() -> None:
+    for stage in range(len(STAGE_HP) + 1):
+        for mirrored in (False, True):
+            injury_texture(stage, mirrored)
+
+
+@dataclass(slots=True)
+class Warp:
+    landmarks: np.ndarray
+    shape: tuple[int, ...]
+    key: tuple[int, bool]
+    points: np.ndarray
+    work_shape: tuple[int, int]
+    shade: np.ndarray | None
+    _skin: np.ndarray | None = None
+    _pallor: np.ndarray | None = None
+
+    def skin(self) -> np.ndarray:
+        if self._skin is None:
+            self._skin = face_weight(self.points, self.work_shape)
+        return self._skin
+
+    def pallor(self) -> np.ndarray:
+        if self._pallor is None:
+            full_size = (self.shape[1], self.shape[0])
+            self._pallor = cv2.resize(self.skin(), full_size, interpolation=cv2.INTER_LINEAR) * PALLOR
+        return self._pallor
+
+
+# Reused for the redraws between camera frames.
+_warps: dict[int, Warp] = {}
 
 
 def draw_face_damage(
@@ -92,76 +113,157 @@ def draw_face_damage(
     if rx1 <= rx0 or ry1 <= ry0:
         return
     roi = image[ry0:ry1, rx0:rx1]
-    local = points - np.array([rx0, ry0], np.float32)
-    if stage >= 3:
-        tint_face(roi, local, SICK, SICK_ALPHA)
+    key = (stage, player_id % 2 == 0)
+
+    warp = _warps.get(player_id)
+    if warp is None or warp.landmarks is not face.landmarks or warp.shape != roi.shape or warp.key != key:
+        local = points - np.array([rx0, ry0], np.float32)
+        warp = _warps[player_id] = build_warp(face.landmarks, local, roi.shape, key, face_w)
+
+    if warp.shade is not None:
+        cv2.multiply(roi, warp.shade, dst=roi, scale=1 / 255)
     if flash > 0.0:
-        tint_face(roi, local, FLASH, FLASH_ALPHA * flash)
-    if stage:
-        overlay = roi.copy()
-        draw_marks(overlay, local, stage, player_id, max(2, round(face_w / 70)))
-        cv2.addWeighted(overlay, MARK_ALPHA, roi, 1 - MARK_ALPHA, 0, dst=roi)
-
-
-def tint_face(roi: np.ndarray, points: np.ndarray, color, alpha: float) -> None:
-    hull = cv2.convexHull(np.round(points).astype(np.int32))
-    overlay = roi.copy()
-    cv2.fillConvexPoly(overlay, hull, color, cv2.LINE_AA)
-    cv2.addWeighted(overlay, alpha, roi, 1 - alpha, 0, dst=roi)
-
-
-def draw_marks(overlay: np.ndarray, points: np.ndarray, stage: int, player_id: int, line: int) -> None:
-    frames = [eye_frame(points, side) for side in EYE_SIDES]
-    widest = max(float(np.linalg.norm(frame[1])) for frame in frames)
-    shown = [float(np.linalg.norm(frame[1])) >= TURNED_AWAY_RATIO * widest for frame in frames]
-    hurt = 0 if player_id % 2 else 1
-    other = 1 - hurt
-
-    if shown[other]:
-        fill(overlay, CHEEK_SOOT, frames[other], SOOT)
-        for speck in CHEEK_SPECKS:
-            fill(overlay, speck, frames[other], SOOT)
-    if shown[hurt]:
-        fill(overlay, JAW_SOOT, frames[hurt], SOOT)
-    if stage >= 2 and shown[hurt]:
-        fill(overlay, BRUISE_SHAPE, frames[hurt], BRUISE, BRUISE_EDGE, line)
-        stroke(overlay, CUT, frames[hurt], SCAR_EDGE, line + 3)
-        stroke(overlay, CUT, frames[hurt], BLOOD, line)
-        for stitch in STITCHES:
-            stroke(overlay, stitch, frames[hurt], SCAR_EDGE, max(1, line - 1))
+        redden = 1.0 - (warp.skin() * (FLASH_STRENGTH * flash))[:, :, None] * (1.0 - FLASH_TINT)
+        tint = cv2.resize((redden * 255).astype(np.uint8), (roi.shape[1], roi.shape[0]))
+        cv2.multiply(roi, tint, dst=roi, scale=1 / 255)
     if stage >= 3:
-        if shown[other]:
-            outer = to_image(SHINER_OUTER, frames[other])
-            hole = to_image(SHINER_HOLE, frames[other])
-            cv2.fillPoly(overlay, [outer, hole], SHINER, cv2.LINE_AA)
-            cv2.polylines(overlay, [outer], True, SHINER_EDGE, line, cv2.LINE_AA)
-        nose = nose_frame(points)
-        for piece in PLASTER_STRIPS:
-            fill(overlay, piece, nose, PLASTER, PLASTER_EDGE, line)
-        fill(overlay, PLASTER_CENTER, nose, PLASTER_PAD)
+        weight = warp.pallor()
+        gray = cv2.cvtColor(cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+        roi[:] = cv2.blendLinear(gray, roi, weight, 1.0 - weight)
 
 
-def eye_frame(points: np.ndarray, side: tuple[int, int, int, int]):
-    outer, inner, lid, cheek = points[list(side)]
-    return (outer + inner) / 2, (outer - inner) / 2, cheek - lid
+def build_warp(
+    landmarks: np.ndarray, points: np.ndarray, shape: tuple[int, ...], key: tuple[int, bool], face_w: float
+) -> Warp:
+    scale = min(1.0, WORK_FACE_PX / face_w)
+    work_shape = (max(1, round(shape[0] * scale)), max(1, round(shape[1] * scale)))
+    points = points * scale
+    texture, painted = injury_texture(*key)
+    map_u, map_v = uv_maps(points, work_shape, painted)
+    shade = None
+    if map_u is not None:
+        warped = cv2.remap(
+            texture, map_u, map_v, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=WHITE
+        )
+        shade = cv2.resize(warped, (shape[1], shape[0]), interpolation=cv2.INTER_LINEAR)
+    return Warp(landmarks, shape, key, points, work_shape, shade)
 
 
-def nose_frame(points: np.ndarray):
-    bridge, inner_a, inner_b, tip = points[list(NOSE)]
-    return bridge, (inner_b - inner_a) / 2, tip - bridge
+def uv_maps(
+    points: np.ndarray, shape: tuple[int, int], painted: np.ndarray
+) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    corners = points[TRIANGLES]
+    origin = corners[:, 0]
+    a, b = corners[:, 1] - origin, corners[:, 2] - origin
+    det = a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]
+
+    # Triangles are stored farthest first and flipped ones face away. On a turned head the nearest ones
+    # (the nose and the middle of the face) cover painted ones behind them, so they are drawn over them.
+    facing = np.flatnonzero(det > 1e-3)
+    flags = painted[facing]
+    if not flags.any():
+        return None, None
+    if is_turned(points):
+        facing = facing[np.argmax(flags) :]
+        facing = facing[painted[facing] | NEAR[facing]]
+    else:
+        facing = facing[flags]
+    ids = np.where(painted[facing], facing + 1, 0).tolist()
+    owner = np.zeros(shape, np.int16)
+    fill = cv2.fillConvexPoly
+    for triangle, value in zip(np.round(corners[facing]).astype(np.int32), ids, strict=True):
+        fill(owner, triangle, value)
+    rows, cols = np.nonzero(owner)
+    tri = owner[rows, cols] - 1
+
+    uv_corners = UV[TRIANGLES[tri]] * (TEXTURE_SIZE - 1)
+    du, dv = uv_corners[:, 1] - uv_corners[:, 0], uv_corners[:, 2] - uv_corners[:, 0]
+    dx, dy = cols - origin[tri, 0], rows - origin[tri, 1]
+    s = (dx * b[tri, 1] - dy * b[tri, 0]) / det[tri]
+    r = (dy * a[tri, 0] - dx * a[tri, 1]) / det[tri]
+    mapped = uv_corners[:, 0] + s[:, None] * du + r[:, None] * dv
+
+    map_u, map_v = np.full(shape, -1.0, np.float32), np.full(shape, -1.0, np.float32)
+    map_u[rows, cols], map_v[rows, cols] = mapped[:, 0], mapped[:, 1]
+    return map_u, map_v
 
 
-def to_image(shape: np.ndarray, frame) -> np.ndarray:
-    origin, u, v = frame
-    return np.round(origin + shape[:, :1] * u + shape[:, 1:] * v).astype(np.int32)
+def is_turned(points: np.ndarray) -> bool:
+    left, right = points[FACE_SIDES[0], 0], points[FACE_SIDES[1], 0]
+    return abs(points[NOSE_TIP, 0] - (left + right) / 2) > TURNED * abs(right - left)
 
 
-def fill(overlay: np.ndarray, shape: np.ndarray, frame, color, edge=None, line: int = 0) -> None:
-    polygon = to_image(shape, frame)
-    cv2.fillPoly(overlay, [polygon], color, cv2.LINE_AA)
-    if edge is not None:
-        cv2.polylines(overlay, [polygon], True, edge, line, cv2.LINE_AA)
+def face_weight(points: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+    face_w = float(np.ptp(points[:, 0]))
+    centre = points.mean(axis=0)
+    hull = cv2.convexHull(np.round(centre + (points - centre) * FACE_TINT_SHRINK).astype(np.int32))
+    mask = np.zeros(shape, np.float32)
+    cv2.fillConvexPoly(mask, hull, 1.0)
+    return cv2.GaussianBlur(mask, (0, 0), max(1.0, face_w * FACE_TINT_FEATHER))
 
 
-def stroke(overlay: np.ndarray, shape: np.ndarray, frame, color, line: int) -> None:
-    cv2.polylines(overlay, [to_image(shape, frame)], False, color, line, cv2.LINE_AA)
+@cache
+def injury_texture(stage: int, mirrored: bool) -> tuple[np.ndarray, np.ndarray]:
+    texture = cv2.resize(paint_stage(stage), (TEXTURE_SIZE, TEXTURE_SIZE), interpolation=cv2.INTER_AREA)
+    if mirrored:
+        texture = np.ascontiguousarray(texture[:, ::-1])
+    marked = (texture.min(axis=2) < 255 - PAINTED_LEVEL).astype(np.uint8)
+    marked = cv2.dilate(marked, np.ones((3, 3), np.uint8))
+    painted = np.zeros(len(TRIANGLES) + 1, bool)
+    painted[np.unique(uv_owner()[marked > 0])] = True
+    return texture, painted[1:]
+
+
+@cache
+def paint_stage(stage: int) -> np.ndarray:
+    shade = np.ones((BASE_SIZE, BASE_SIZE, 3), np.float32)
+    for decal in DECALS:
+        if decal.stage <= stage:
+            stamp(shade, decal)
+    skin = skin_mask()[:, :, None].astype(np.float32) / 255
+    return ((1 - (1 - np.clip(shade, 0, 1)) * skin) * 255).astype(np.uint8)
+
+
+def stamp(shade: np.ndarray, decal: Decal) -> None:
+    image = load_decal(decal.image)
+    height, width = image.shape[:2]
+    centre = (UV[list(decal.anchor)].mean(axis=0) + decal.offset) * BASE_SIZE
+    angle = np.radians(decal.angle_deg)
+    rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    linear = rotation * (np.array(decal.size) * BASE_SIZE / (width, height))
+    matrix = np.hstack([linear, (centre - linear @ (width / 2, height / 2))[:, None]]).astype(np.float32)
+    warped = (
+        cv2.warpAffine(
+            image, matrix, (BASE_SIZE, BASE_SIZE), flags=cv2.INTER_LINEAR, borderValue=(255, 255, 255, 0)
+        ).astype(np.float32)
+        / 255
+    )
+    shade *= 1 - warped[:, :, 3:] * decal.strength * (1 - warped[:, :, :3])
+
+
+@cache
+def load_decal(name: str) -> np.ndarray:
+    image = cv2.imread(str(DECAL_DIR / name), cv2.IMREAD_UNCHANGED)
+    if image is None or image.ndim != 3 or image.shape[2] != 4:
+        raise FileNotFoundError(f"{DECAL_DIR / name} missing - run: python tools/make_face_decals.py")
+    return image
+
+
+@cache
+def uv_owner() -> np.ndarray:
+    owner = np.zeros((TEXTURE_SIZE, TEXTURE_SIZE), np.int16)
+    uv_pixels = np.round(UV * (TEXTURE_SIZE - 1)).astype(np.int32)
+    for index, triangle in enumerate(TRIANGLES):
+        cv2.fillConvexPoly(owner, uv_pixels[triangle], index + 1)
+    return owner
+
+
+@cache
+def skin_mask() -> np.ndarray:
+    mask = np.zeros((BASE_SIZE, BASE_SIZE), np.uint8)
+    uv_pixels = np.round(UV * (BASE_SIZE - 1)).astype(np.int32)
+    for triangle in TRIANGLES:
+        cv2.fillConvexPoly(mask, uv_pixels[triangle], 255)
+    feather = int(SKIN_FEATHER * BASE_SIZE)
+    inner = cv2.erode(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * feather + 1, 2 * feather + 1)))
+    return cv2.GaussianBlur(inner, (0, 0), feather / 1.5)

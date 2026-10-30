@@ -1,8 +1,10 @@
 import numpy as np
 
 from highnoon.config import FilterConfig
-from highnoon.contracts import Player, PoseObservation
-from highnoon.vision.motion import MotionFilter
+from highnoon.contracts import FaceObservation, HandObservation, Player, PoseObservation
+from highnoon.vision.motion import HAND_HOLD_S, MotionFilter
+
+L_WRIST, R_WRIST = 15, 16
 
 
 def body(vis_shoulders=True, vis_hips=True):
@@ -19,54 +21,126 @@ def body(vis_shoulders=True, vis_hips=True):
     return kp, vis
 
 
-def signals(kp, vis):
-    mf = MotionFilter(FilterConfig())
-    p = Player(id=1, pose=PoseObservation(kp, vis), visible=True)
-    mf.update([p], 0.0, set())
+def hand(pointer=(60, -80), wrist=(840, 370), openness=2.0, fingers_curled=False):
+    """Knuckles spread across the end of the palm, fingertips beyond them or folded back."""
+    wrist = np.array(wrist, np.float32)
+    pointer = np.array(pointer, np.float32)
+    across = np.array([-pointer[1], pointer[0]], np.float32) * 0.3
+    points = np.tile(wrist, (21, 1))
+    for offset, knuckle in zip((1.5, 0.5, -0.5, -1.5), (5, 9, 13, 17), strict=True):
+        points[knuckle] = wrist + pointer + across * offset
+        tip = wrist + pointer * (0.6 if fingers_curled else 1.8) + across * offset
+        points[knuckle + 3] = tip
+    return HandObservation(points, openness, 0)
+
+
+def player(hands=None, vis_shoulders=True, vis_hips=True, kp=None):
+    keypoints, vis = body(vis_shoulders, vis_hips)
+    pose = PoseObservation(kp if kp is not None else keypoints, vis)
+    return Player(id=1, pose=pose, hands=hands or {}, visible=True)
+
+
+def signals(p):
+    MotionFilter(FilterConfig()).update([p], 0.0, set())
     return p.signals
 
 
-def test_bent_arm_aims_along_forearm():
-    s = signals(*body())
+def angle(signal):
+    return np.degrees(np.arctan2(signal.aim_dir[1], signal.aim_dir[0]))
+
+
+def test_aims_where_the_palm_points():
+    s = signals(player({R_WRIST: hand()}))
     assert s.aim_valid
-    expected = np.array([60, -80], np.float32) / 100
-    np.testing.assert_allclose(s.aim_dir, expected, atol=1e-5)
+    np.testing.assert_allclose(s.aim_dir, np.array([60, -80], np.float32) / 100, atol=1e-5)
+
+
+def test_the_arm_does_not_change_the_aim():
+    kp, _ = body()
+    kp[14] = (700, 200)  # the elbow somewhere else entirely
+    s = signals(player({R_WRIST: hand(pointer=(90, 0))}, kp=kp))
+    np.testing.assert_allclose(s.aim_dir, (1, 0), atol=1e-5)
+
+
+def test_closing_the_fist_keeps_the_aim():
+    still_open = signals(player({R_WRIST: hand()}))
+    fist = signals(player({R_WRIST: hand(fingers_curled=True, openness=1.0)}))
+    np.testing.assert_allclose(fist.aim_dir, still_open.aim_dir, atol=1e-5)
+
+
+def test_no_hand_means_no_aim():
+    assert not signals(player()).aim_valid
 
 
 def test_aims_when_shoulders_and_hips_out_of_frame():
-    s = signals(*body(vis_shoulders=False, vis_hips=False))
+    s = signals(player({R_WRIST: hand()}, vis_shoulders=False, vis_hips=False))
     assert s.aim_valid
     assert np.degrees(s.elevation) > 45
 
 
 def test_scale_from_shoulders_when_hips_hidden():
-    s = signals(*body(vis_hips=False))
+    s = signals(player(vis_hips=False))
     assert abs(s.torso_len - 160 / 0.8) < 1e-3
 
 
-def test_forearm_pointing_at_camera_gives_no_aim():
-    kp, vis = body()
-    kp[16] = kp[14] + (10, -5)
-    kp[15] = kp[13] + (0, 10)
-    assert not signals(kp, vis).aim_valid
+def test_palm_pointing_at_the_camera_gives_no_aim():
+    assert not signals(player({R_WRIST: hand(pointer=(4, -3))})).aim_valid
+
+
+def test_hand_hanging_down_gives_no_aim():
+    assert not signals(player({R_WRIST: hand(pointer=(5, 90))})).aim_valid
+
+
+def test_left_hand_takes_over_when_the_right_cannot_aim():
+    s = signals(player({L_WRIST: hand(pointer=(-90, 0), wrist=(480, 640))}))
+    assert s.aim_valid
+    np.testing.assert_allclose(s.aim_dir, (-1, 0), atol=1e-5)
+    np.testing.assert_allclose(s.aim_origin, (480, 640))
+
+
+def test_a_brief_tracking_dropout_holds_the_aim_then_stops():
+    mf = MotionFilter(FilterConfig())
+    mf.update([player({R_WRIST: hand(pointer=(90, 0))})], 0.0, set())
+
+    during = player()
+    mf.update([during], HAND_HOLD_S - 0.05, set())
+    assert during.signals.aim_valid
+    assert abs(angle(during.signals)) < 1
+
+    after = player()
+    mf.update([after], HAND_HOLD_S + 0.05, set())
+    assert not after.signals.aim_valid
 
 
 def test_aim_smoothing_reduces_jitter_and_follows_swings():
     rng = np.random.default_rng(0)
     mf = MotionFilter(FilterConfig())
     angles = []
+    raw = []
     for i in range(90):
-        kp, vis = body()
-        kp[16] = kp[14] + (60, -80) + rng.normal(0, 4, 2)
-        p = Player(id=1, pose=PoseObservation(kp, vis), visible=True)
+        observed = hand()
+        observed.landmarks += rng.normal(0, 2, observed.landmarks.shape).astype(np.float32)
+        p = player({R_WRIST: observed})
+        pointer = observed.landmarks[[5, 9, 13, 17]].mean(axis=0) - observed.landmarks[0]
+        raw.append(np.degrees(np.arctan2(pointer[1], pointer[0])))
         mf.update([p], i / 30, set())
-        angles.append(np.arctan2(p.signals.aim_dir[1], p.signals.aim_dir[0]))
-    raw_jitter = np.degrees(np.std([np.arctan2(-80 + d[1], 60 + d[0]) for d in rng.normal(0, 4, (60, 2))]))
-    assert np.degrees(np.std(angles[30:])) < raw_jitter * 0.5
+        angles.append(angle(p.signals))
+    assert np.std(angles[30:]) < np.std(raw[30:]) * 0.5
 
     for i in range(90, 110):
-        kp, vis = body()
-        kp[16] = kp[14] + (60, 0)
-        p = Player(id=1, pose=PoseObservation(kp, vis), visible=True)
+        p = player({R_WRIST: hand(pointer=(90, 0))})
         mf.update([p], i / 30, set())
-    assert abs(np.degrees(np.arctan2(p.signals.aim_dir[1], p.signals.aim_dir[0]))) < 5
+    assert abs(angle(p.signals)) < 5
+
+
+def test_face_landmarks_are_smoothed_and_dropped_with_the_face():
+    mf = MotionFilter(FilterConfig())
+    landmarks = np.full((478, 2), 100.0, np.float32)
+    p = Player(id=1, face=FaceObservation(landmarks, np.array([90, 90, 110, 110], np.float32)), visible=True)
+    mf.update([p], 0.0, set())
+    p.face = FaceObservation(landmarks + 4.0, p.face.bbox)
+    mf.update([p], 1 / 30, set())
+    assert np.all((p.face_smoothed > 100.0) & (p.face_smoothed < 104.0))
+    p.face = None
+    mf.update([p], 2 / 30, set())
+    assert p.face_smoothed is None

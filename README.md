@@ -80,7 +80,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m highnoon --practice      # solo mode: shoot bottles to test the mechanics
 ```
 
-Keys: `q`/`esc` quit, `r` restart round, `d` debug overlay (skeleton, signal values, timings;
+Keys: `q`/`esc` quit, `r` restart round, `h` simulate a hit (cuts 25% HP, to test the face damage), `d` debug overlay (skeleton, signal values, timings;
 off by default), `b` toggle background, `f` fullscreen. Sound effects are on; `--mute` turns them off.
 
 ## How to play
@@ -89,7 +89,7 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 
 | Action | Movement |
 |---|---|
-| **Aim** | Point with your arm (straight, or just the forearm when sitting close). The weapon you hold (revolver, rocket launcher or grenade), outlined in your colour, follows your hand and shows the angle. Rockets and grenades show a dotted arc of where they will land |
+| **Aim** | Point with your palm: turning your hand is enough, your arm can stay where it is. Keep the hand side-on to the camera rather than pointing at it. The weapon you hold (revolver, rocket launcher or grenade), outlined in your colour, follows your hand and shows the angle. Rockets and grenades show a dotted arc of where they will land |
 | **Shoot** | Aim with an **open hand**, then **close it into a fist**. Hold the hand open again briefly before the next shot (at most one shot every 0.6 s). Shots fired quickly after each other kick: each one adds up to 10° of random spread (20° max), which recovers within about 1.2 s |
 | **Duck** | Get your head below the top of the wall (the bottom 25% of the screen). You are safe there but cannot shoot |
 | **Reload** | Stay ducked for 0.8 s to refill the magazine (3 bullets). A bar under your name shows the progress |
