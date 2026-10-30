@@ -13,32 +13,41 @@ def live_game():
     return game
 
 
-def test_sunset_follows_round_time_only():
+def hp(value: int):
+    return type("State", (), {"hp": value})()
+
+
+def test_sunset_follows_round_time_or_the_lowest_players_hp_whichever_is_further():
     game = live_game()
+    game.states = {1: hp(100), 2: hp(100)}
     assert sunset_target(game, 0.0) == 0.0
-    assert sunset_target(game, SUNSET_AFTER_S / 2) == 0.5
-    game.states[1] = type("State", (), {"hp": 5})()
-    assert sunset_target(game, 1.0) == 1.0 / SUNSET_AFTER_S
+    assert sunset_target(game, SUNSET_AFTER_S / 4) == 0.25
+    game.states = {1: hp(80), 2: hp(50)}
+    assert sunset_target(game, SUNSET_AFTER_S / 4) == 0.5
+    assert sunset_target(game, SUNSET_AFTER_S * 0.75) == 0.75
+    assert sunset_target(game, SUNSET_AFTER_S * 2) == 1.0
     game.mode = "idle"
-    assert sunset_target(game, 30.0) == 0.0
+    assert sunset_target(game, SUNSET_AFTER_S) == 0.0
 
 
-def test_sky_fades_gradually_to_sunset_and_stops_there():
+def test_sky_eases_to_sunset_after_a_big_hit_and_stops_there():
     game = live_game()
+    game.states = {1: hp(100), 2: hp(100)}
     scenery = Scenery()
     scenery.build(320, 180, game.cfg.cover_height)
     scenery.update(game)
     day = scenery.background.astype(int)
+    game.states[2] = hp(0)
     changes = []
-    for second in range(1, 121):
-        game._t = float(second)
+    for frame in range(1, 301):
+        game._t = frame / 30
         before = scenery.background.astype(int)
         scenery.update(game)
         changes.append(np.abs(scenery.background.astype(int) - before).max())
     assert scenery.sunset == 1.0
     assert np.abs(scenery.background.astype(int) - day).mean() > 10
-    assert max(changes) <= 8, "each second only nudges the sky"
-    assert max(changes[int(SUNSET_AFTER_S) + 1 :]) == 0, "it stops at sunset"
+    assert max(changes) <= 8, "it fades instead of jumping"
+    assert max(changes[-30:]) == 0, "it stops at sunset"
 
 
 def test_wall_damage_lasts_for_the_round_only():

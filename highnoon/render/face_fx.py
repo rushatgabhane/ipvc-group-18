@@ -52,6 +52,13 @@ class FaceEffectRenderer:
         if face_width < 4 or face_height < 4:
             return image
 
+        original_h, original_w = self.hat.shape[:2]
+
+        target_width = int(face_width * 1.5)
+        scale = target_width / original_w
+
+        target_height = max(1, int(original_h * scale))
+
         angle = 0.0
 
         if len(points) > 263:
@@ -80,13 +87,6 @@ class FaceEffectRenderer:
         else:
             center_x = int((x1 + x2) / 2)
             center_y = int(y1 - target_height * 0.35)
-
-        original_h, original_w = self.hat.shape[:2]
-
-        target_width = int(face_width * 1.5)
-        scale = target_width / original_w
-
-        target_height = max(1, int(original_h * scale))
 
         hat = cv2.resize(self.hat,
                          (target_width, target_height),
