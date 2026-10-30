@@ -50,6 +50,7 @@ class Game:
         self.aims: dict[int, Aim] = {}
         self.mode = "idle"
         self.winner: int | None = None
+        self.forfeited: int | None = None
         self.round_over_t: float | None = None
         self.round = 0
         self.round_start_t = 0.0
@@ -70,7 +71,8 @@ class Game:
         self._wall = self.wall
         self._create_states(players, reassigned)
         self._update_mode(sum(p.visible for p in players) >= (1 if self.cfg.practice else 2), t)
-        if self.round_over_t is not None and t - self.round_over_t >= self.cfg.round_end_s:
+        self._check_forfeit(t)
+        if self.forfeited is None and self.round_over_t is not None and t - self.round_over_t >= self.cfg.round_end_s:
             self.reset_round()
             self.mode, self.countdown_end_t = "countdown", t + self.cfg.countdown_s
         self._update_powerup(t)
@@ -99,15 +101,31 @@ class Game:
     def round_live(self) -> bool:
         return self.mode == "duel" and self.round_over_t is None
 
+    def _absent_for(self, player: Player) -> float:
+        return self._t - player.last_seen if not player.visible and player.id in self.states else 0.0
+
     @property
     def missing_players(self) -> list[int]:
-        if self.mode != "duel":
+        if self.mode != "duel" or self.cfg.practice:
             return []
-        return [
-            player.id
-            for player in self._players.values()
-            if not player.visible and self._t - player.last_seen > self.cfg.come_back_after_s
-        ]
+        return [p.id for p in self._players.values() if self._absent_for(p) > self.cfg.come_back_after_s]
+
+    def leave_countdown(self, player_id: int) -> float:
+        """Seconds until a missing player forfeits the game."""
+        absent = self._absent_for(self._players[player_id])
+        return max(0.0, self.cfg.come_back_after_s + self.cfg.leave_timeout_s - absent)
+
+    def _check_forfeit(self, t: float) -> None:
+        if self.forfeited is not None:
+            return
+        for player_id in self.missing_players:
+            if self.leave_countdown(player_id) <= 0:
+                self.forfeited = player_id
+                self.mode = "forfeit"
+                self.bullets.clear()
+                self.rockets.clear()
+                self.grenades.clear()
+                return
 
     def countdown_left(self, t: float) -> float:
         return max(0.0, self.countdown_end_t - t) if self.mode == "countdown" else 0.0

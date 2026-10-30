@@ -256,12 +256,24 @@ def test_player_leaving_keeps_the_duel_and_asks_them_back():
     def p2_gone():
         return [make_player(1, 300), Player(id=2, last_seen=left_at)]
 
-    t = step(game, p2_gone, int(3 / DT), t)
+    t = step(game, p2_gone, int(0.5 / DT), t)
     assert game.mode == "duel" and game.missing_players == []
-    t = step(game, p2_gone, int(3 / DT), t)
+    t = step(game, p2_gone, int(2 / DT), t)
     assert game.mode == "duel" and game.missing_players == [2]
+    assert 0 < game.leave_countdown(2) < game.cfg.leave_timeout_s
     step(game, duel, 2, t)
     assert game.mode == "duel" and game.missing_players == [] and game.states[2].hp == 60
+
+
+def test_player_who_stays_away_forfeits_after_the_countdown():
+    game, t = start_duel()
+    left_at = t
+
+    def p2_gone():
+        return [make_player(1, 300), Player(id=2, last_seen=left_at)]
+
+    step(game, p2_gone, int((game.cfg.come_back_after_s + game.cfg.leave_timeout_s) / DT) + 3, t)
+    assert game.mode == "forfeit" and game.forfeited == 2
 
 
 def test_grenade_aim_previews_a_lob_onto_the_opponent():
@@ -330,7 +342,7 @@ def test_practice_shatters_one_of_several_bottles():
 
 def test_practice_with_one_player_never_asks_anyone_to_come_back():
     game, t = start_practice()
-    step(game, lambda: [make_player(1, 300)], int(game.cfg.come_back_after_s / DT) + 5, t)
+    step(game, lambda: [make_player(1, 300)], int((game.cfg.come_back_after_s + game.cfg.leave_timeout_s) / DT) + 5, t)
     assert game.missing_players == []
 
 

@@ -25,6 +25,7 @@ COUNTDOWN_SIZE = 220
 WAITING_LINES = (("TWO PLAYERS", 110), ("STEP INTO VIEW", 80))
 PRACTICE_WAITING_LINES = (("PRACTICE", 110), ("STEP INTO VIEW", 80))
 COUNTDOWN_COLOR = GOLD
+ENROL_TEXT = "HANDING OUT PLAYER IDS"
 WIN_SUBTITLE = "WINS THE ROUND"
 BLOWN_UP = "BLOWN UP"
 BLOWN_UP_SUBTITLE = "DON'T SHOOT THE BOMBS"
@@ -67,8 +68,11 @@ class Hud:
         self._waiting_sprites(scale)
         self._waiting_sprites(scale, PRACTICE_WAITING_LINES)
         for player_id in self.colors:
-            self._come_back_sprite(player_id, scale)
-        for number in range(1, 4):
+            self._lose_sprite(player_id, scale)
+            for seconds_left in range(6):
+                self._come_back_sprites(player_id, seconds_left, scale)
+        self._enrol_sprite(scale)
+        for number in range(1, 6):
             self._countdown_sprite(number, scale)
         self._blown_up_sprite(scale)
         for seconds_left in range(5):
@@ -116,11 +120,15 @@ class Hud:
             self._draw_winner(image, game, t, scale)
         if game.mode == "countdown":
             self._draw_countdown(image, game.countdown_left(t), scale)
+            if game.round == 0:
+                self._draw_enrolment(image, t, scale)
         if game.mode == "idle":
             lines = PRACTICE_WAITING_LINES if game.cfg.practice else WAITING_LINES
             self._draw_waiting(image, t, scale, lines)
-        if not round_over:
-            self._draw_come_back(image, game.missing_players, t, scale)
+        if not round_over and game.forfeited is None:
+            self._draw_come_back(image, game, t, scale)
+        if game.forfeited is not None:
+            self._draw_forfeit(image, game, scale)
         self._draw_announcements(image, t, scale)
 
     def _waiting_sprites(self, scale: float, lines=WAITING_LINES):
@@ -136,16 +144,39 @@ class Hud:
         blit_center(image, assets.scaled(top, pulse), width / 2, height * 0.36)
         blit_center(image, assets.scaled(bottom, pulse), width / 2, height * 0.36 + top.height * 0.9)
 
-    def _come_back_sprite(self, player_id: int, scale: float):
+    def _come_back_sprites(self, player_id: int, seconds_left: int, scale: float):
         color = self.colors.get(player_id, WHITE)
-        return self._announcement_sprite(f"P{player_id}: COME BACK ON SCREEN", 64, color, scale)
+        return (
+            self._announcement_sprite(f"P{player_id}: WAITING FOR PLAYER ID", 64, color, scale),
+            self._announcement_sprite(f"GAME ENDS IN {seconds_left}s", 64, color, scale),
+        )
 
-    def _draw_come_back(self, image, missing: list[int], t: float, scale: float) -> None:
+    def _draw_come_back(self, image, game: Game, t: float, scale: float) -> None:
         height, width = image.shape[:2]
         alpha = 1.0 if int(t * 3) % 2 == 0 else 0.7
-        for row, player_id in enumerate(missing):
-            sprite = self._come_back_sprite(player_id, scale)
-            blit_center(image, sprite, width / 2, height * 0.3 + row * sprite.height, alpha)
+        y = height * 0.3
+        for player_id in game.missing_players:
+            seconds_left = math.ceil(game.leave_countdown(player_id))
+            for sprite in self._come_back_sprites(player_id, seconds_left, scale):
+                blit_center(image, sprite, width / 2, y, alpha)
+                y += sprite.height
+
+    def _lose_sprite(self, player_id: int, scale: float):
+        color = self.colors.get(player_id, WHITE)
+        return self._announcement_sprite(f"PLAYER {player_id}: YOU LOSE", 110, color, scale)
+
+    def _draw_forfeit(self, image, game: Game, scale: float) -> None:
+        height, width = image.shape[:2]
+        cv2.convertScaleAbs(image, dst=image, alpha=0.45)
+        blit_center(image, self._lose_sprite(game.forfeited, scale), width / 2, height * 0.42)
+
+    def _enrol_sprite(self, scale: float):
+        return self._announcement_sprite(ENROL_TEXT, 64, CREAM, scale)
+
+    def _draw_enrolment(self, image, t: float, scale: float) -> None:
+        height, width = image.shape[:2]
+        alpha = 1.0 if int(t * 3) % 2 == 0 else 0.7
+        blit_center(image, self._enrol_sprite(scale), width / 2, height * 0.16, alpha)
 
     def _draw_countdown(self, image, seconds_left: float, scale: float) -> None:
         if seconds_left <= 0:

@@ -60,6 +60,8 @@ def main() -> None:
         effects_before = len(game.effects)
         ammo_before = {pid: state.ammo for pid, state in game.states.items()}
         game.update(players, t, tracker.reassigned)
+        if game.mode == "duel":
+            tracker.lock()
 
         events: dict[int, list[str]] = {}
         log = EventLog(t, events, timeline)
