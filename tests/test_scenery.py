@@ -3,7 +3,7 @@ import numpy as np
 from highnoon.config import GameConfig
 from highnoon.game.entities import Effect
 from highnoon.game.game import Game
-from highnoon.render.scenery import Scenery
+from highnoon.render.scenery import SUNSET_AFTER_S, Scenery, sunset_target
 
 
 def live_game():
@@ -13,18 +13,41 @@ def live_game():
     return game
 
 
-def test_it_stays_day_however_long_and_hard_the_round_goes():
+def hp(value: int):
+    return type("State", (), {"hp": value})()
+
+
+def test_sunset_follows_round_time_or_the_lowest_players_hp_whichever_is_further():
     game = live_game()
+    game.states = {1: hp(100), 2: hp(100)}
+    assert sunset_target(game, 0.0) == 0.0
+    assert sunset_target(game, SUNSET_AFTER_S / 4) == 0.25
+    game.states = {1: hp(80), 2: hp(50)}
+    assert sunset_target(game, SUNSET_AFTER_S / 4) == 0.5
+    assert sunset_target(game, SUNSET_AFTER_S * 0.75) == 0.75
+    assert sunset_target(game, SUNSET_AFTER_S * 2) == 1.0
+    game.mode = "idle"
+    assert sunset_target(game, SUNSET_AFTER_S) == 0.0
+
+
+def test_sky_eases_to_sunset_after_a_big_hit_and_stops_there():
+    game = live_game()
+    game.states = {1: hp(100), 2: hp(100)}
     scenery = Scenery()
     scenery.build(320, 180, game.cfg.cover_height)
     scenery.update(game)
-    day_sky, day_wall = scenery.background.copy(), scenery.wall.copy()
-    game.states[1] = type("State", (), {"hp": 5})()
-    for minutes in range(1, 6):
-        game._t = minutes * 60.0
+    day = scenery.background.astype(int)
+    game.states[2] = hp(0)
+    changes = []
+    for frame in range(1, 301):
+        game._t = frame / 30
+        before = scenery.background.astype(int)
         scenery.update(game)
-    assert np.array_equal(scenery.background, day_sky)
-    assert np.array_equal(scenery.wall, day_wall)
+        changes.append(np.abs(scenery.background.astype(int) - before).max())
+    assert scenery.sunset == 1.0
+    assert np.abs(scenery.background.astype(int) - day).mean() > 10
+    assert max(changes) <= 8, "it fades instead of jumping"
+    assert max(changes[-30:]) == 0, "it stops at sunset"
 
 
 def test_wall_damage_lasts_for_the_round_only():

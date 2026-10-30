@@ -93,3 +93,10 @@ def test_the_inset_makes_way_for_the_debug_stats(monkeypatch):
     monkeypatch.setattr(renderer_module, "draw_signal_debug", lambda *args: None)
     x0, y0, x1, y1 = inset_box(WIDTH, HEIGHT, WALL_TOP)
     assert not np.all(camera_picture(show_debug=True)[y0:y1, x0:x1] == CAMERA_COLOR)
+
+
+def test_hat_is_drawn_for_a_face_without_eye_landmarks():
+    canvas = np.zeros((HEIGHT, WIDTH, 3), np.uint8)
+    face = make_face(300.0)
+    FaceEffectRenderer().draw(canvas, FaceObservation(face.landmarks[:10], face.bbox))
+    assert canvas.any()

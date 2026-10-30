@@ -8,6 +8,13 @@ import numpy as np
 from highnoon.game.game import Game
 from highnoon.render import assets
 
+# The sky is pre-rendered at a few keyframes between midday and sunset and cross-faded between them.
+SUNSET_KEYFRAMES = 5
+SUNSET_LEVELS = 120
+# HP is lost in chunks, so the sky eases towards where it should be instead of jumping.
+SUNSET_EASE_PER_S = 0.15
+SUNSET_AFTER_S = 60.0
+WALL_SUNSET_SHARE = 0.6
 CHARRED = (22, 24, 28)
 EMBER = (30, 90, 210)
 PALE_WOOD = (140, 185, 220)
@@ -25,11 +32,16 @@ class Scenery:
         self.background: np.ndarray | None = None
         self.wall: np.ndarray | None = None
         self.shadow: np.ndarray | None = None
+        self.sunset = 0.0
+        self._skies: list[np.ndarray] = []
         self._sky: np.ndarray | None = None
         self._land: np.ndarray | None = None
         self._ground: np.ndarray | None = None
         self._horizon = 0
         self._clean_wall: np.ndarray | None = None
+        self._damaged_wall: np.ndarray | None = None
+        self._level = -1
+        self._t_last: float | None = None
         self._round: int | None = None
         self._seen: set[int] = set()
         self._rng = np.random.default_rng(seed)
@@ -40,9 +52,13 @@ class Scenery:
             return False
         self.size, self.wall_top = (width, height), wall_top
         vignette = assets.vignette(width, height)
-        desert = assets.desert_background(width, height)
-        self._sky = cv2.multiply(desert, vignette, scale=1 / 255)
-        land = np.any(desert != assets.sky_with_sun(width, height), axis=2).astype(np.float32)
+        keyframes = [
+            assets.desert_background(width, height, sunset=i / (SUNSET_KEYFRAMES - 1))
+            for i in range(SUNSET_KEYFRAMES)
+        ]
+        self._skies = [cv2.multiply(sky, vignette, scale=1 / 255) for sky in keyframes]
+        self._sky = self._skies[0].copy()
+        land = np.any(keyframes[0] != assets.sky_with_sun(width, height), axis=2).astype(np.float32)
         self._land = cv2.GaussianBlur(land, (5, 5), 0)
         self._horizon = int(height * assets.HORIZON)
         self._ground = np.full((height, width, 3), 255, np.uint8)
@@ -50,45 +66,75 @@ class Scenery:
         self._clean_wall = cv2.multiply(
             assets.wooden_wall(width, height - wall_top), vignette[wall_top:], scale=1 / 255
         )
+        self._damaged_wall = self._clean_wall.copy()
         self.wall = self._clean_wall.copy()
+        self._level = -1
         shadow_h = max(8, height // 40)
         ramp = (np.linspace(1.0, 0.55, shadow_h, dtype=np.float32) ** 1.5 * 255).astype(np.uint8)
         self.shadow = cv2.merge([np.tile(ramp[:, None], (1, width))] * 3)
         return True
 
     def update(self, game: Game) -> None:
-        ground_changed = False
+        t = game.now
+        dt = 0.0 if self._t_last is None else max(0.0, t - self._t_last)
+        self._t_last = t
+        wall_changed = ground_changed = False
         if game.round != self._round:
             self._round = game.round
-            self.wall[:] = self._clean_wall
+            self._damaged_wall[:] = self._clean_wall
             self._ground[:] = 255
-            ground_changed = True
-        ground_changed |= self._stamp_new_damage(game)
+            wall_changed = ground_changed = True
+        stamped_wall, stamped_ground = self._stamp_new_damage(game)
+        wall_changed |= stamped_wall
+        ground_changed |= stamped_ground
+        target = sunset_target(game, t)
+        step = SUNSET_EASE_PER_S * dt
+        self.sunset += float(np.clip(target - self.sunset, -step, step))
+        level = round(self.sunset * SUNSET_LEVELS)
+        if level != self._level:
+            self._level = level
+            self._blend_sky(level / SUNSET_LEVELS)
+            wall_changed = ground_changed = True
+        if wall_changed:
+            self._light_wall()
         if ground_changed:
             cv2.multiply(self._sky, self._ground, dst=self.background, scale=1 / 255)
 
-    def _stamp_new_damage(self, game: Game) -> bool:
-        ground = False
+    def _blend_sky(self, sunset: float) -> None:
+        position = sunset * (SUNSET_KEYFRAMES - 1)
+        index = min(int(position), SUNSET_KEYFRAMES - 2)
+        mix = position - index
+        cv2.addWeighted(self._skies[index], 1 - mix, self._skies[index + 1], mix, 0, dst=self._sky)
+
+    def _light_wall(self) -> None:
+        land = assets.daylight(self._level / SUNSET_LEVELS).land
+        tint = tuple(1 - (1 - k) * WALL_SUNSET_SHARE for k in land) + (1.0,)
+        cv2.multiply(self._damaged_wall, tint, dst=self.wall)
+
+    def _stamp_new_damage(self, game: Game) -> tuple[bool, bool]:
+        wall = ground = False
         for effect in game.effects:
             if id(effect) in self._seen:
                 continue
             if effect.kind == "blocked":
                 self._bullet_hole(effect.pos)
+                wall = True
             elif effect.kind == "explosion":
                 radius = game.explosion_radius(effect.detail == "grenade")
                 self._blast(effect.pos, radius)
                 self._scar_ground(effect.pos, radius)
-                ground = True
+                wall = ground = True
             elif effect.kind == "bottle":
                 self._glass(effect.pos)
+                wall = True
         self._seen = {id(effect) for effect in game.effects}
-        return ground
+        return wall, ground
 
     def _bullet_hole(self, pos: np.ndarray) -> None:
         x, y = float(pos[0]), float(pos[1]) - self.wall_top
         if y < 0:
             return
-        wall, rng = self.wall, self._rng
+        wall, rng = self._damaged_wall, self._rng
         radius = max(3, int(self.size[1] * 0.007))
         center = (int(x), int(y))
         for angle in rng.uniform(0, math.tau, 7):
@@ -103,7 +149,7 @@ class Scenery:
         reach = radius * 0.7
         if y + reach < 0:
             return
-        scorch(self.wall, x, y, reach, self._rng)
+        scorch(self._damaged_wall, x, y, reach, self._rng)
         if abs(y) < radius * 0.5:
             self._notch(x, radius * 0.45, radius * 0.35 * (1 - abs(y) / (radius * 0.5)))
 
@@ -141,16 +187,26 @@ class Scenery:
         points = np.stack(
             [x + np.cos(angles) * half_width * jitter, np.sin(angles) * depth * jitter], axis=1
         ).astype(np.int32)
-        cv2.fillPoly(self.wall, [points], CHARRED, cv2.LINE_AA)
-        cv2.polylines(self.wall, [points], False, EMBER, 2, cv2.LINE_AA)
+        cv2.fillPoly(self._damaged_wall, [points], CHARRED, cv2.LINE_AA)
+        cv2.polylines(self._damaged_wall, [points], False, EMBER, 2, cv2.LINE_AA)
 
     def _glass(self, pos: np.ndarray) -> None:
-        wall, rng = self.wall, self._rng
+        wall, rng = self._damaged_wall, self._rng
         rail = max(10, wall.shape[0] // 9)
         spread = self.size[1] * 0.03
         for i in range(10):
             shard = (int(pos[0] + rng.uniform(-spread, spread)), int(rng.uniform(2, rail - 2)))
             cv2.circle(wall, shard, int(rng.integers(1, 3)), GLASS[i % 2], -1, cv2.LINE_AA)
+
+
+def sunset_target(game: Game, t: float) -> float:
+    """How far towards sunset the sky should be: the round time out of `SUNSET_AFTER_S` or the share of
+    HP the lowest player has lost, whichever is further along."""
+    if game.mode != "duel":
+        return 0.0
+    elapsed = (game.round_over_t if game.round_over_t is not None else t) - game.round_start_t
+    lowest = min((state.hp for state in game.states.values()), default=game.cfg.max_hp)
+    return float(np.clip(max(elapsed / SUNSET_AFTER_S, 1 - lowest / game.cfg.max_hp), 0.0, 1.0))
 
 
 def scorch(
