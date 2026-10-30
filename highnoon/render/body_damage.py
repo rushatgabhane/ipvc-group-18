@@ -1,29 +1,15 @@
 from __future__ import annotations
 
+import math
+
 import cv2
 import numpy as np
 
 from highnoon.contracts import Player
-from highnoon.render.face_damage import (
-    BLOB_JITTER,
-    BLOOD,
-    FLASH,
-    HIT_FLASH_S,
-    MARK_ALPHA,
-    PLASTER,
-    PLASTER_EDGE,
-    SCAR_EDGE,
-    SICK,
-    SOOT,
-    damage_stage,
-    ellipse,
-    fill,
-    strip,
-    stroke,
-)
+from highnoon.render.face_damage import HIT_FLASH_S, damage_stage
 
 # Cartoon damage for the rest of the player. The torso and the hands carry marks defined in a small
-# frame spanned by their keypoints (like the face); the whole person mask gets a tint on top.
+# frame spanned by their keypoints; the whole person mask gets a tint on top.
 SHOULDERS, HIPS = (11, 12), (23, 24)
 MIN_VISIBILITY = 0.5
 MIN_TORSO_PX = 40
@@ -32,6 +18,44 @@ ROI_PAD = 0.3
 # Same soft threshold the camera layer uses to cut the person out of the background.
 MASK_LOW, MASK_HIGH = 0.45, 0.9
 RIM_KERNEL = np.ones((7, 7), np.uint8)
+
+MARK_ALPHA = 0.9
+FLASH = (60, 60, 255)
+SICK = (150, 205, 170)
+SOOT = (55, 60, 70)
+BLOOD, SCAR_EDGE = (40, 40, 215), (25, 20, 60)
+PLASTER, PLASTER_EDGE = (150, 200, 235), (40, 70, 110)
+BLOB_JITTER = np.array([1.0, 0.8, 1.1, 0.9, 1.15, 0.85, 1.0, 0.75, 1.1, 0.95, 1.2, 0.8, 1.0, 0.9])
+
+
+def ellipse(cx: float, cy: float, rx: float, ry: float, jitter=None, n: int = 24) -> np.ndarray:
+    angles = np.linspace(0, math.tau, n if jitter is None else len(jitter), endpoint=False)
+    scale = 1.0 if jitter is None else jitter
+    return np.stack([cx + rx * scale * np.cos(angles), cy + ry * scale * np.sin(angles)], axis=1)
+
+
+def strip(cx: float, cy: float, length: float, width: float, angle_deg: float) -> np.ndarray:
+    a = math.radians(angle_deg)
+    along, across = np.array([math.cos(a), math.sin(a)]), np.array([-math.sin(a), math.cos(a)])
+    corners = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
+    return np.array([[cx, cy] + along * length / 2 * i + across * width / 2 * j for i, j in corners])
+
+
+def to_image(shape: np.ndarray, frame) -> np.ndarray:
+    origin, u, v = frame
+    return np.round(origin + shape[:, :1] * u + shape[:, 1:] * v).astype(np.int32)
+
+
+def fill(overlay: np.ndarray, shape: np.ndarray, frame, color, edge=None, line: int = 0) -> None:
+    polygon = to_image(shape, frame)
+    cv2.fillPoly(overlay, [polygon], color, cv2.LINE_AA)
+    if edge is not None:
+        cv2.polylines(overlay, [polygon], True, edge, line, cv2.LINE_AA)
+
+
+def stroke(overlay: np.ndarray, shape: np.ndarray, frame, color, line: int) -> None:
+    cv2.polylines(overlay, [to_image(shape, frame)], False, color, line, cv2.LINE_AA)
+
 
 DUST = (110, 140, 165)
 DUST_ALPHA = 0.12
