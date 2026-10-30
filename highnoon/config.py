@@ -47,6 +47,8 @@ class FilterConfig:
 class TrackingConfig:
     max_match_distance: float = 0.25
     lost_timeout_s: float = 5.0
+    # Past this, a missing player can only come back by face: a body near where they left could be anyone.
+    track_gap_s: float = 5.0
     reid_confirm_s: float = 0.15
     enrol_max_samples: int = 90
     face_accept: float = 0.36

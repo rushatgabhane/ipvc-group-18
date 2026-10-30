@@ -195,3 +195,15 @@ def test_ids_swapped_by_position_are_corrected_by_face():
     tr.lock()
     players = play(tr, [(300, BOB), (900, ALICE)], 1.0, seconds=1.0)
     assert ids_by_x(players) == {1: 900, 2: 300}
+
+
+def test_stranger_stepping_into_a_players_spot_during_enrolment_is_released():
+    tr = IdentityTracker(TrackingConfig())
+    for i in range(10):
+        tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
+    play(tr, [(300, ALICE)], 0.5, seconds=2.0)
+    assert ids_by_x(play(tr, [(300, ALICE), (920, STRANGER)], 2.55)) == {1: 300}
+    assert ids_by_x(play(tr, [(300, ALICE), (920, STRANGER), (600, BOB)], 3.2, seconds=0.3)) == {
+        1: 300,
+        2: 600,
+    }

@@ -18,8 +18,6 @@ HAND_GATE_PER_SHOULDER_WIDTH = 0.8
 NO_MATCH = 1e6
 UPDATE_MIN_GAP_PER_WIDTH = 0.12
 PENDING_GAP_S = 0.4
-# Past this, a missing player can only come back by face: a body near where they left could be anyone.
-TRACK_GAP_S = 1.5
 RECENT_FACE_SCORES = 3
 CANDIDATE_SAMPLES = 8
 FACE_TOP_K = 3
@@ -108,14 +106,14 @@ class IdentityTracker:
 
     def _release_lost_players(self, t: float) -> None:
         for slot, player in enumerate(self.players):
-            lost_too_long = not player.visible and t - player.last_seen > self.cfg.lost_timeout_s
-            if self._active[slot] and lost_too_long:
-                self._active[slot] = False
-                self._last_center[slot] = None
-                self._doubts.pop(slot, None)
-                if not self.locked:
-                    self._claimed[slot] = False
-                    self._face_samples[slot] = []
+            if player.visible or t - player.last_seen <= self.cfg.lost_timeout_s:
+                continue
+            self._active[slot] = False
+            self._last_center[slot] = None
+            self._doubts.pop(slot, None)
+            if not self.locked:
+                self._claimed[slot] = False
+                self._face_samples[slot] = []
 
     def _claim_slot(self, slot: int, pose, center: np.ndarray, t: float) -> None:
         player = self.players[slot]
@@ -129,15 +127,16 @@ class IdentityTracker:
         self._last_center[slot] = center
 
     def _learn(self, slot: int, embedding: np.ndarray) -> None:
-        if not self.locked:
-            samples = self._face_samples[slot]
-            samples.append(embedding)
-            del samples[: -self.cfg.enrol_max_samples]
-        elif (
-            not self._has_face(slot)
-            or self._face_similarity(slot, embedding[None])[0] >= self.cfg.face_accept
-        ):
+        """Keep a face for the slot, once its first face is known only if it looks like the same person."""
+        known = self._has_face(slot)
+        if known and self._face_similarity(slot, embedding[None])[0] < self.cfg.face_accept:
+            return
+        if self.locked:
             self._recent_faces[slot].append(embedding)
+            return
+        samples = self._face_samples[slot]
+        samples.append(embedding)
+        del samples[: -self.cfg.enrol_max_samples]
 
     def _match_bodies_to_slots(
         self, centers: list[np.ndarray], embeddings: list[np.ndarray | None], width: int, t: float
@@ -147,8 +146,7 @@ class IdentityTracker:
         cost = self._distance_cost(centers, self.cfg.max_match_distance * width, t)
         rows, cols = linear_sum_assignment(cost)
         assignment = {r: c for r, c in zip(rows, cols, strict=True) if cost[r, c] < NO_MATCH}
-        if self.locked:
-            self._verify_owners(assignment, embeddings, t)
+        self._verify_owners(assignment, embeddings, t)
 
         newcomers = [r for r in range(len(centers)) if r not in assignment]
         held = self._return_known_players(newcomers, centers, embeddings, assignment, width, t)
@@ -280,7 +278,7 @@ class IdentityTracker:
         cost = np.full((len(centers), len(self.players)), NO_MATCH)
         for slot, player in enumerate(self.players):
             last = self._last_center[slot]
-            if self._active[slot] and last is not None and t - player.last_seen <= TRACK_GAP_S:
+            if self._active[slot] and last is not None and t - player.last_seen <= self.cfg.track_gap_s:
                 distance = np.linalg.norm(np.asarray(centers) - last, axis=1)
                 cost[:, slot] = np.where(distance <= max_distance, distance, NO_MATCH)
         return cost
