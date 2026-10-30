@@ -23,9 +23,6 @@ BULLET_STREAK = 0.12
 BULLET_STREAK_WIDTH = 0.004
 STREAK_COLOR = (215, 225, 230)
 STREAK_ALPHA = 0.35
-RECOIL_S = 0.14
-RECOIL_KICK = 0.02  # of the frame height, backwards along the aim
-RECOIL_FLIP_DEG = 14.0  # muzzle rises by this much at the moment of the shot
 
 
 class WorldView:
@@ -48,7 +45,7 @@ class WorldView:
         self._draw_grenade_warnings(image, game, t, scale)
         for player_id, aim in game.aims.items():
             color = self.colors.get(player_id, WHITE)
-            draw_weapon(image, game, aim, color, recoil(game, player_id, t))
+            draw_weapon(image, game, aim, color)
             self._draw_reticle(image, aim, color, scale)
 
     def _draw_bottle(self, image, bottle, t: float) -> None:
@@ -187,22 +184,13 @@ def draw_crosshair(
         cv2.line(image, start, end, color, thickness, cv2.LINE_AA)
 
 
-def recoil(game: Game, player_id: int, t: float) -> float:
-    """1.0 at the moment this player fires, falling to 0.0 over RECOIL_S."""
-    for effect in reversed(game.effects):
-        if effect.kind == "muzzle" and effect.player == player_id:
-            return max(0.0, 1.0 - (t - effect.t) / RECOIL_S)
-    return 0.0
-
-
-def draw_weapon(image, game: Game, aim, color, kick: float = 0.0) -> None:
+def draw_weapon(image, game: Game, aim, color) -> None:
     direction = aim.direction
     reach_px = int((game.reach(aim.weapon) - game.cfg.hand_reach) * game.height)
     right, left = assets.held_weapon(aim.weapon, tuple(color), reach_px)
     sprite = right if direction[0] >= 0 else left
     angle = math.degrees(math.atan2(float(direction[1]), float(direction[0])))
-    hand = aim.origin + direction * (game.cfg.hand_reach - RECOIL_KICK * kick) * game.height
-    angle += (-1.0 if direction[0] >= 0 else 1.0) * RECOIL_FLIP_DEG * kick
+    hand = aim.origin + direction * game.cfg.hand_reach * game.height
     blit_center(image, assets.rotated(sprite, -angle), hand[0], hand[1])
 
 

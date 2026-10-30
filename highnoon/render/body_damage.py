@@ -8,34 +8,27 @@ import numpy as np
 from highnoon.contracts import Player
 from highnoon.render.face_damage import HIT_FLASH_S, damage_stage
 
-# Damage for the rest of the player. The torso and the hands carry marks defined in a small frame
-# spanned by their keypoints; the whole person mask gets a tint on top. Marks are drawn into soft
-# masks and blended into the camera image (stains darken the cloth instead of covering it).
+# Damage for the rest of the player: bullet holes and blood on the torso, and a red flash over the
+# person on a fresh hit. Marks are defined in a small frame spanned by the keypoints,
+# drawn into soft masks and blended into the camera image (stains darken the cloth instead of covering
+# it).
 SHOULDERS, HIPS = (11, 12), (23, 24)
 MIN_VISIBILITY = 0.5
 MIN_TORSO_PX = 40
-MIN_PALM_PX = 8
 ROI_PAD = 0.3
 # Same soft threshold the camera layer uses to cut the person out of the background.
 MASK_LOW, MASK_HIGH = 0.45, 0.9
 MIN_FEATHER_PX = 0.8
-TORSO_LINE_DIV, HAND_LINE_DIV = 45, 8  # mark line width = half the torso/palm width / this
+TORSO_LINE_DIV = 45  # mark line width = half the torso width / this
 
-DUST_TINT, DUST_ALPHA = (110, 140, 165), 0.08
-DARK_TINT, DARK_ALPHA = (20, 15, 15), 0.12
-DESATURATE = (0.0, 0.0, 0.15, 0.35)  # by damage stage
 FLASH, FLASH_ALPHA = (60, 60, 255), 0.3
 
-SOOT, BLOOD = (75, 80, 92), (25, 25, 140)
+BLOOD = (25, 25, 140)
 HOLE_RING, HOLE_CORE = (40, 45, 60), (8, 8, 10)
-CLOTH, SEAM = (215, 225, 235), (165, 175, 190)
 # (layer, colour, strength, multiply, softness) in drawing order. Multiplied layers darken what is
 # underneath so the texture of the cloth shows through; the others cover it. Softness scales the blur
-# of the edge: smudges are softer than holes and cuts.
+# of the edge: stains are softer than holes.
 COMPOSITE = (
-    ("soot", SOOT, 0.55, True, 4.0),
-    ("cloth", CLOTH, 0.92, False, 1.0),
-    ("seam", SEAM, 0.5, True, 1.0),
     ("ring", HOLE_RING, 0.7, True, 1.0),
     ("core", HOLE_CORE, 0.95, True, 1.0),
     ("blood", BLOOD, 0.55, True, 1.5),
@@ -56,13 +49,6 @@ def ragged(cx: float, cy: float, rx: float, ry: float, jitter: float = 0.35, n: 
     return ellipse(cx, cy, rx, ry, 1.0 + _RNG.uniform(-jitter, jitter, n))
 
 
-def strip(cx: float, cy: float, length: float, width: float, angle_deg: float) -> np.ndarray:
-    a = math.radians(angle_deg)
-    along, across = np.array([math.cos(a), math.sin(a)]), np.array([-math.sin(a), math.cos(a)])
-    corners = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
-    return np.array([[cx, cy] + along * length / 2 * i + across * width / 2 * j for i, j in corners])
-
-
 def to_image(shape: np.ndarray, frame) -> np.ndarray:
     origin, u, v = frame
     return np.round(origin + shape[:, :1] * u + shape[:, 1:] * v).astype(np.int32)
@@ -75,22 +61,15 @@ HOLES_SHOWN = (0, 1, 3, 4)
 HOLE_RINGS = [ragged(u, v, 0.11, 0.05) for u, v in HOLES]
 HOLE_CORES = [ragged(u, v, 0.055, 0.024, jitter=0.2) for u, v in HOLES]
 HOLE_SPLITS = [
-    [np.array([[u, v], [u + 0.17 * math.cos(a), v + 0.075 * math.sin(a)]]) for a in _RNG.uniform(0, math.tau, 3)]
+    [
+        np.array([[u, v], [u + 0.17 * math.cos(a), v + 0.075 * math.sin(a)]])
+        for a in _RNG.uniform(0, math.tau, 3)
+    ]
     for u, v in HOLES
 ]
-TORSO_DUST = [ellipse(-0.5, 0.55, 0.35, 0.1, BLOB_JITTER), ellipse(0.5, 0.2, 0.25, 0.07, BLOB_JITTER[::-1])]
 STAIN = ellipse(0.25, 0.62, 0.3, 0.1, BLOB_JITTER)
 STAIN_CORE = ellipse(0.25, 0.64, 0.18, 0.06, BLOB_JITTER[::-1])
 DRIPS = [np.array([[u, 0.7], [u, v]]) for u, v in ((0.15, 0.92), (0.3, 0.85))]
-
-# Hand frame: origin in the palm, u = half the knuckle row (index to pinky), v = wrist to middle knuckle.
-WRIST, INDEX_KNUCKLE, MIDDLE_KNUCKLE, PINKY_KNUCKLE = 0, 5, 9, 17
-HAND_SOOT = ellipse(0.1, -0.15, 0.7, 0.15, BLOB_JITTER)
-BANDAGE = strip(0.0, 0.05, 2.2, 0.28, 0)
-BANDAGE_WRAP = strip(0.0, 0.4, 2.0, 0.2, 6)
-BANDAGE_SEAMS = [np.array([[u, -0.09], [u + 0.12, 0.19]]) for u in (-0.8, -0.3, 0.2, 0.7)]
-HAND_BLOOD = ellipse(0.4, 0.05, 0.22, 0.06, n=10)
-HAND_BLOOD_CORE = ellipse(0.4, 0.05, 0.12, 0.035, n=10)
 
 
 class Marks:
@@ -112,7 +91,7 @@ def player_columns(players: list[Player]) -> dict[int, tuple[float, float]]:
     seen = sorted(
         ((float(player.pose.center()[0]), player.id) for player in players if player.visible and player.pose),
     )
-    edges = [-np.inf] + [(a[0] + b[0]) / 2 for a, b in zip(seen, seen[1:])] + [np.inf]
+    edges = [-np.inf] + [(a[0] + b[0]) / 2 for a, b in zip(seen, seen[1:], strict=False)] + [np.inf]
     return {pid: (edges[i], edges[i + 1]) for i, (_, pid) in enumerate(seen)}
 
 
@@ -125,7 +104,7 @@ def draw_body_damage(
     columns: tuple[float, float] = (-np.inf, np.inf),
     floor_y: int | None = None,
 ) -> None:
-    """Draws damage on the torso, hands and silhouette of one player. `mask` is the person mask at
+    """Draws damage on the torso and silhouette of one player. `mask` is the person mask at
     image size, `columns` the x range this player owns and `floor_y` the row where the cover wall
     starts (nothing is drawn below it)."""
     stage = damage_stage(hp_fraction)
@@ -134,33 +113,23 @@ def draw_body_damage(
         return
     keypoints = player.smoothed if player.smoothed is not None else player.pose.keypoints
     visible = player.pose.visibility > MIN_VISIBILITY
-    torso = torso_frame(keypoints, visible)
-    hands = [hand_frame(hand.landmarks) for hand in player.hands.values()]
-    hands = [frame for frame in hands if frame is not None]
-
-    roi_points = [keypoints[list(SHOULDERS + HIPS)]] + [frame[3] for frame in hands]
-    roi = region(image, np.concatenate(roi_points), floor_y)
+    torso_points = keypoints[list(SHOULDERS + HIPS)]
+    roi = region(image, torso_points, floor_y)
     if roi is None:
         return
     (x0, y0, x1, y1), view = roi
     if mask is not None:
         person = person_alpha(mask[y0:y1, x0:x1], columns, x0)
-        tint_silhouette(view, person, stage, flash)
+        flash_silhouette(view, person, flash)
 
-    if stage == 0:
+    torso = torso_frame(keypoints, visible)
+    if stage == 0 or torso is None:
         return
-    parts = [(frame[3], frame[:3], draw_hand, HAND_LINE_DIV) for frame in hands]
-    if torso is not None:
-        parts.append((keypoints[list(SHOULDERS + HIPS)], torso, draw_torso, TORSO_LINE_DIV))
-    for points, (origin, u, v), draw, line_div in parts:
-        sub = region(image, points, floor_y)
-        if sub is None:
-            continue
-        (sx0, sy0, _, _), part = sub
-        line = max(1, round(float(np.linalg.norm(u)) / line_div))
-        marks = Marks(part.shape[:2])
-        draw(marks, (origin - np.array([sx0, sy0], np.float32), u, v), stage, line)
-        composite(part, marks, max(MIN_FEATHER_PX, line * 0.5))
+    origin, u, v = torso
+    line = max(1, round(float(np.linalg.norm(u)) / TORSO_LINE_DIV))
+    marks = Marks(view.shape[:2])
+    draw_torso(marks, (origin - np.array([x0, y0], np.float32), u, v), stage, line)
+    composite(view, marks, max(MIN_FEATHER_PX, line * 0.5))
 
 
 def torso_frame(keypoints: np.ndarray, visible: np.ndarray):
@@ -173,17 +142,6 @@ def torso_frame(keypoints: np.ndarray, visible: np.ndarray):
     if float(np.linalg.norm(u)) * 2 < MIN_TORSO_PX:
         return None
     return shoulders, u, v
-
-
-def hand_frame(landmarks: np.ndarray):
-    if len(landmarks) <= PINKY_KNUCKLE:
-        return None
-    points = np.asarray(landmarks, np.float32)[:, :2]
-    wrist, index, middle, pinky = points[[WRIST, INDEX_KNUCKLE, MIDDLE_KNUCKLE, PINKY_KNUCKLE]]
-    u = (index - pinky) / 2
-    if float(np.linalg.norm(u)) * 2 < MIN_PALM_PX:
-        return None
-    return (wrist + index + middle + pinky) / 4, u, middle - wrist, points
 
 
 def region(image: np.ndarray, points: np.ndarray, floor_y: int | None):
@@ -208,34 +166,10 @@ def person_alpha(mask: np.ndarray, columns: tuple[float, float], x_offset: int) 
     return person
 
 
-def tint_silhouette(view: np.ndarray, person: np.ndarray, stage: int, flash: float) -> None:
-    """Drains the colour from the player as HP drops, darkens them at the lowest stage, and flashes
-    red on a fresh hit. Only the player's own pixels change, never the background."""
-    if not person.any():
-        return
-    if DESATURATE[stage]:
-        desaturate(view, person * DESATURATE[stage])
-    layers = [(FLASH, FLASH_ALPHA * flash)] if flash > 0.0 else []
-    if stage >= 2:
-        layers.append((DUST_TINT, DUST_ALPHA))
-    if stage >= 3:
-        layers.append((DARK_TINT, DARK_ALPHA))
-    if layers:
-        tint(view, person, *combine(layers))
-
-
-def combine(layers: list[tuple[tuple[int, int, int], float]]) -> tuple[tuple[float, ...], float]:
-    """Several constant-colour tints applied in turn, as one colour and one strength."""
-    color, clear = np.zeros(3), 1.0
-    for tone, alpha in layers:
-        color = color * (1 - alpha) + np.array(tone) * alpha
-        clear *= 1 - alpha
-    return tuple(color / (1 - clear)), 1 - clear
-
-
-def desaturate(view: np.ndarray, alpha: np.ndarray) -> None:
-    gray = cv2.cvtColor(cv2.cvtColor(view, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
-    cv2.blendLinear(view, gray, 1.0 - alpha, alpha, dst=view)
+def flash_silhouette(view: np.ndarray, person: np.ndarray, flash: float) -> None:
+    """Flashes the player red on a fresh hit. Only the player's own pixels change, never the background."""
+    if flash > 0.0 and person.any():
+        tint(view, person, FLASH, FLASH_ALPHA * flash)
 
 
 def tint(view: np.ndarray, person: np.ndarray, color, strength: float = 1.0) -> None:
@@ -266,8 +200,6 @@ def composite(view: np.ndarray, marks: Marks, feather: float) -> None:
 
 
 def draw_torso(marks: Marks, frame, stage: int, line: int) -> None:
-    for patch in TORSO_DUST:
-        marks.fill("soot", patch, frame)
     if stage >= 3:
         marks.fill("blood", STAIN, frame)
         marks.fill("blood_core", STAIN_CORE, frame)
@@ -278,17 +210,3 @@ def draw_torso(marks: Marks, frame, stage: int, line: int) -> None:
         for split in HOLE_SPLITS[i]:
             marks.stroke("ring", split, frame, 1)
         marks.fill("core", HOLE_CORES[i], frame)
-
-
-def draw_hand(marks: Marks, frame, stage: int, line: int) -> None:
-    marks.fill("soot", HAND_SOOT, frame)
-    if stage >= 2:
-        marks.fill("cloth", BANDAGE, frame)
-        marks.stroke("ring", BANDAGE, frame, line, closed=True)
-        for seam in BANDAGE_SEAMS:
-            marks.stroke("seam", seam, frame, 1)
-    if stage >= 3:
-        marks.fill("cloth", BANDAGE_WRAP, frame)
-        marks.stroke("ring", BANDAGE_WRAP, frame, line, closed=True)
-        marks.fill("blood", HAND_BLOOD, frame)
-        marks.fill("blood_core", HAND_BLOOD_CORE, frame)

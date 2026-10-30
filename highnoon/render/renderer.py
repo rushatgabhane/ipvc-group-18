@@ -23,22 +23,11 @@ LEG_BONES = [(23, 25), (25, 27), (24, 26), (26, 28)]
 SKELETON = TORSO_BONES + ARM_BONES + LEG_BONES
 MASK_LOW, MASK_HIGH = 0.45, 0.9
 ERODE_KERNEL = np.ones((3, 3), np.uint8)
-# Warm sepia grade for the camera feed so the player sits in the Western scene: a gentle S-curve for
-# contrast, then each channel scaled (BGR) towards amber. One lookup table, built once.
-GRADE_GAIN = (0.82, 0.96, 1.08)
-GRADE_CONTRAST = 0.25
 MAX_FRAME_STEP_S = 0.1
 STATS_SHOWN = ("latency", "inference", "pose", "face", "hand", "render")
 INSET_HEIGHT = 0.14
 INSET_MARGIN = 0.022
 INSET_BORDER = (20, 16, 14)
-
-
-def build_grade_lut() -> np.ndarray:
-    levels = np.arange(256, dtype=np.float32) / 255.0
-    curve = levels + GRADE_CONTRAST * (levels - 0.5) * (1.0 - np.abs(2.0 * levels - 1.0))
-    table = np.stack([np.clip(curve * gain, 0.0, 1.0) for gain in GRADE_GAIN], axis=1)
-    return np.round(table * 255.0).astype(np.uint8).reshape(256, 1, 3)
 
 
 class Renderer:
@@ -50,7 +39,6 @@ class Renderer:
         self.world = WorldView(PLAYER_COLORS, self.text, self.fx)
         self.hud = Hud(PLAYER_COLORS, self.text, self.fx)
         self.scenery = Scenery()
-        self._grade_lut = build_grade_lut()
         self.face_fx = FaceEffectRenderer()
         self.shake = (0, 0)
         self._t_last: float | None = None
@@ -139,11 +127,8 @@ class Renderer:
         cv2.rectangle(image, (x0 - 2, y0 - 2), (x1 + 1, y1 + 1), INSET_BORDER, 2)
 
     def _camera_layer(self, camera: np.ndarray, mask: np.ndarray | None) -> np.ndarray:
-        graded = self.cfg.grade
-        if graded:
-            camera = cv2.LUT(camera, self._grade_lut)
         if not self.cfg.background or mask is None:
-            return camera if graded else camera.copy()
+            return camera.copy()
         if mask.shape != camera.shape[:2]:
             mask = cv2.resize(mask, (camera.shape[1], camera.shape[0]), interpolation=cv2.INTER_LINEAR)
         gain = 1.0 / (MASK_HIGH - MASK_LOW)

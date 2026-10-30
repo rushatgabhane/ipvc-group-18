@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 
-from highnoon.contracts import HandObservation, PoseObservation, Player
+from highnoon.contracts import HandObservation, Player, PoseObservation
 from highnoon.render.body_damage import draw_body_damage, player_columns
 
 
@@ -54,13 +54,10 @@ def test_torso_marks_stay_on_the_torso():
     assert rows.min() >= 70 and rows.max() <= 270 and cols.min() >= 130 and cols.max() <= 270
 
 
-def test_hands_get_a_bandage():
+def test_hands_are_not_marked():
     image = blank()
-    draw_body_damage(image, make_player(with_hand=True), 0.5, math.inf)
-    assert changed(image)[255:310, 40:100].any()
-    plain = blank()
-    draw_body_damage(plain, make_player(), 0.5, math.inf)
-    assert not changed(plain)[255:310, 40:100].any()
+    draw_body_damage(image, make_player(with_hand=True), 0.2, math.inf)
+    assert not changed(image)[255:310, 40:100].any()
 
 
 def test_a_fresh_hit_flashes_the_silhouette_and_fades():
@@ -71,7 +68,7 @@ def test_a_fresh_hit_flashes_the_silhouette_and_fades():
     assert np.all(old == 128)
 
 
-def test_silhouette_tint_needs_the_person_mask():
+def test_hit_flash_needs_the_person_mask():
     image = blank()
     draw_body_damage(image, make_player(), 1.0, 0.0, None)
     assert np.all(image == 128)
@@ -100,9 +97,7 @@ def test_tiny_torsos_are_skipped():
     assert np.all(image == 128)
 
 
-def test_low_hp_drains_the_colour_from_the_player_but_not_the_background():
-    image = np.full((400, 400, 3), (50, 100, 200), np.uint8)
+def test_low_hp_does_not_tint_the_player():
+    image = blank()
     draw_body_damage(image, make_player(), 0.2, math.inf, person_mask())
-    spread = lambda pixel: int(pixel.max()) - int(pixel.min())  # noqa: E731
-    assert spread(image[70, 115]) < 150  # on the person, clear of the marks
-    assert spread(image[70, 20]) == 150  # background in the same region
+    assert tuple(image[70, 115]) == (128, 128, 128)  # on the person, clear of the marks

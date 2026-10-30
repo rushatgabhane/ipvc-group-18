@@ -19,7 +19,7 @@ from highnoon.vision.perception import Perceiver, PerceptionWorker
 MAX_EXTRAPOLATE_S = 0.1
 PERIOD_FOLLOW = 0.1
 LATE_FRAME = 1.5
-KEY_HELP = "q/esc quit | r restart round | h simulate a hit | d debug overlay | b background | g colour grade | f fullscreen"
+KEY_HELP = "q/esc quit | r restart round | h simulate a hit | d debug overlay | b background | f fullscreen"
 
 
 def run(cfg: Config) -> Profiler:
@@ -154,8 +154,6 @@ def handle_keys(keys: list[str], cfg: Config, game: Game, display: Display) -> b
         cfg.display.show_debug = not cfg.display.show_debug
     if "b" in keys:
         cfg.display.background = not cfg.display.background
-    if "g" in keys:
-        cfg.display.grade = not cfg.display.grade
     if "r" in keys:
         game.reset_round()
     if "h" in keys:

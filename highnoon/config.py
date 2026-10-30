@@ -123,7 +123,6 @@ class DisplayConfig:
     sound: bool = True
     render_hz: int = 60
     background: bool = True
-    grade: bool = True
 
 
 @dataclass
