@@ -92,6 +92,10 @@ class GameConfig:
     rocket_min_damage: int = 20
     grenade_flight_s: float = 1.4
     grenade_arc: float = 0.45
+    grenade_blast_radius: float = 0.5
+    grenade_damage: int = 80
+    grenade_min_damage: int = 10
+    grenade_drop_chance: float = 0.25
     practice: bool = False
     practice_powerup_interval_s: float = 10.0
     bomb_damage: int = 25

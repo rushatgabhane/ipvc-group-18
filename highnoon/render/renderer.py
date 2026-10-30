@@ -66,6 +66,8 @@ class Renderer:
         self._t_last = t
         image = self._base.copy()
 
+        # Faces are still tracked behind the wall, so their effects only get the picture above it.
+        above_wall = image[: self.scenery.wall_top]
         for player in players:
             if player.visible and player.face is not None:
                 state = game.states.get(player.id)
@@ -74,9 +76,9 @@ class Renderer:
                     face = player.face
                     if player.face_smoothed is not None:
                         face = FaceObservation(player.face_smoothed, face.bbox)
-                    draw_face_damage(image, face, player.id, hp_fraction, t - state.last_hit_t)
+                    draw_face_damage(above_wall, face, player.id, hp_fraction, t - state.last_hit_t)
                 color = PLAYER_COLORS.get(player.id, WHITE)
-                self.face_fx.draw(image, player.face, color)
+                self.face_fx.draw(above_wall, player.face, color)
 
         self.fx.update(t, game.effects)
         self.world.draw(image, game, t, dt)

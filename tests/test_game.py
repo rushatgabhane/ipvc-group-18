@@ -188,25 +188,108 @@ def test_rocket_blast_reaches_a_ducked_player():
     assert game.states[2].hp < 100
 
 
-def throw_grenade(p2_y: float) -> Game:
-    game, t = start_duel(lambda: duel(UP_RIGHT, p2_y))
+AT_OWN_FEET = (0.3, 1.0)
+
+
+def throw_grenade(
+    aim=RIGHT,
+    p2_y=STANDING,
+    p2_x=900.0,
+    p2_x_on_landing=None,
+    p1_y_on_landing=STANDING,
+    p1_hp=None,
+    p2_hp=None,
+) -> Game:
+    def players(hand=OPEN, p1_y=STANDING, x=p2_x):
+        return [
+            make_player(1, 300, shoulder_y=p1_y, aim_dir=aim, hand=hand),
+            make_player(2, x, shoulder_y=p2_y),
+        ]
+
+    game, t = start_duel(players)
     game.states[1].grenades = 1
-    t = fire(game, t, aim=UP_RIGHT, p2_y=p2_y, settle_frames=0)
+    game.states[1].hp = p1_hp or game.states[1].hp
+    game.states[2].hp = p2_hp or game.states[2].hp
+    t = step(game, players, 12, t)
+    t = step(game, lambda: players(FIST), 1, t)
     assert len(game.grenades) == 1 and game.states[1].ammo == game.cfg.max_ammo
-    step(game, lambda: duel(UP_RIGHT, p2_y), int(game.cfg.grenade_flight_s / DT) + 2, t)
+    moved_x = p2_x if p2_x_on_landing is None else p2_x_on_landing
+    step(game, lambda: players(p1_y=p1_y_on_landing, x=moved_x), int(game.cfg.grenade_flight_s / DT) + 2, t)
     assert not game.grenades
     return game
 
 
-def test_grenade_kills_a_standing_player():
-    game = throw_grenade(STANDING)
+def test_grenade_on_target_badly_hurts_without_killing_from_full_hp():
+    game = throw_grenade()
+    assert game.states[2].hp == 100 - game.cfg.grenade_damage and game.winner is None
+    assert game.round_over_t is None
+    assert game.states[1].hp == 100
+
+
+def test_grenade_finishes_a_wounded_player():
+    game = throw_grenade(p2_hp=50)
     assert game.states[2].hp == 0 and game.winner == 1
 
 
 def test_grenade_spares_a_ducked_player():
-    game = throw_grenade(DUCKED)
+    game = throw_grenade(aim=DOWN_RIGHT, p2_y=DUCKED)
     assert game.states[2].hp == 100 and game.winner is None
     assert any(e.kind == "safe" for e in game.effects)
+
+
+def test_grenade_goes_where_it_is_aimed_not_to_the_opponent():
+    game = throw_grenade(aim=(0.2, -1.0))
+    assert game.states[2].hp == 100
+    blast = next(e for e in game.effects if e.kind == "explosion")
+    assert blast.pos[1] < 5 and blast.pos[0] < 500  # left through the top of the screen, far from them
+
+
+def test_grenade_does_not_follow_the_target_and_damage_falls_off_with_distance():
+    hp = [throw_grenade(p2_x_on_landing=x).states[2].hp for x in (900.0, 1000.0, 1100.0, 1180.0)]
+    cfg = GameConfig()
+    assert hp[0] == cfg.max_hp - cfg.grenade_damage
+    assert hp == sorted(hp) and len(set(hp)) == len(hp)
+    assert hp[-1] < cfg.max_hp - cfg.grenade_min_damage
+
+
+def test_splash_reaches_most_of_a_blast_radius_away():
+    game = throw_grenade(p2_x_on_landing=1180.0)
+    assert game.states[2].hp < 100
+    assert game.blast_radius(grenade=True) > game.explosion_radius(grenade=True)
+
+
+def test_running_clear_of_the_blast_avoids_the_grenade():
+    assert throw_grenade(p2_x_on_landing=1300.0).states[2].hp == 100
+
+
+def test_grenade_splash_hurts_a_nearby_thrower_with_falloff():
+    game = throw_grenade(aim=AT_OWN_FEET)
+    cfg = game.cfg
+    assert cfg.max_hp - cfg.grenade_damage < game.states[1].hp < cfg.max_hp - cfg.grenade_min_damage
+    assert game.states[2].hp == cfg.max_hp
+
+
+def test_ducking_protects_the_thrower_from_the_splash():
+    assert throw_grenade(aim=AT_OWN_FEET, p1_y_on_landing=DUCKED).states[1].hp == 100
+
+
+def test_blowing_yourself_up_gives_the_opponent_the_round():
+    game = throw_grenade(aim=AT_OWN_FEET, p1_hp=5)
+    assert game.states[1].hp == 0 and game.winner == 2
+    assert game.scores.get(1, 0) == 0 and game.scores[2] == 1
+
+
+def test_a_blast_that_would_kill_both_gives_the_round_to_the_thrower():
+    game = throw_grenade(aim=AT_OWN_FEET, p2_x=550.0, p1_hp=5, p2_hp=5)
+    assert game.states[2].hp == 0 and game.states[1].hp == 5
+    assert game.winner == 1 and game.scores == {1: 1}
+
+
+def test_grenades_are_the_rarer_powerup():
+    game, _ = start_duel()
+    kinds = [game._toss_powerup(0.0).kind for _ in range(1000)]
+    assert 0.2 < kinds.count("grenade") / len(kinds) < 0.3
+    assert set(kinds) == {"rocket", "grenade"}
 
 
 def test_countdown_starts_only_with_both_players_and_blocks_shooting():

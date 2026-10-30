@@ -117,7 +117,7 @@ class Scenery:
             if effect.kind == "blocked":
                 wall |= self._bullet_hole(effect.pos)
             elif effect.kind == "explosion":
-                radius = game.blast_radius(effect.detail == "grenade")
+                radius = game.explosion_radius(effect.detail == "grenade")
                 wall |= self._blast(effect.pos, radius)
                 ground |= self._scar_ground(effect.pos, radius)
             elif effect.kind == "bottle":

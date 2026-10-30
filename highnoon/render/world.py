@@ -107,7 +107,7 @@ class WorldView:
         for rocket in game.rockets:
             draw_rocket_flame(glow, rocket, t, scale)
         for blast in blasts:
-            draw_fireball(glow, blast, game.blast_radius(blast.detail == "grenade"), t)
+            draw_fireball(glow, blast, game.explosion_radius(blast.detail == "grenade"), t)
         for muzzle in muzzles:
             draw_muzzle_flash(glow, muzzle, t, scale)
         cv2.add(image, glow, dst=image)
@@ -130,7 +130,7 @@ class WorldView:
             if effect.kind != "explosion" or age >= EXPLOSION_S:
                 continue
             progress = age / EXPLOSION_S
-            radius = int(game.blast_radius(effect.detail == "grenade") * (0.3 + 1.2 * progress))
+            radius = int(game.explosion_radius(effect.detail == "grenade") * (0.3 + 1.2 * progress))
             thickness = max(1, int(10 * scale * (1 - progress)))
             cv2.circle(image, point(effect.pos), radius, CREAM, thickness, cv2.LINE_AA)
             if progress < 0.5:
@@ -147,6 +147,8 @@ class WorldView:
                 continue
             color = SAFE_GREEN if safe else RED
             center = point(grenade.landing)
+            blast = int(game.blast_radius(grenade=True))
+            cv2.circle(image, center, blast, color, max(1, int(2 * scale)), cv2.LINE_AA)
             radius = int((34 + 10 * math.sin(t * 14)) * scale)
             cv2.circle(image, center, radius + 2, BLACK, max(3, int(5 * scale)), cv2.LINE_AA)
             draw_crosshair(image, center, radius, color, t * 2, 0.5, 1.3, max(2, int(3 * scale)))
