@@ -302,8 +302,9 @@ reset for the next round.
 - **Sides:** Player 1 is bruised under the left eye of the image and Player 2 under the right, so
   the two players look different.
 - **Skipped when:** no face is detected, or the face is less than 24 px wide.
-- **Cost:** about 0.1 ms per face at the first stage and up to about 0.45 ms at the last stage with
-  a hit flash. Only the area around the face is blended.
+- **Cost:** about 0.2 ms per face at the first stage and up to about 0.5 ms at the last stage with
+  a hit flash (measured on synthetic 90 and 180 px faces in a 1280×720 frame). Only the area around
+  the face is blended.
 
 ### Hat
 
@@ -315,8 +316,10 @@ facial damage.
   wide, and is drawn at 90% opacity under the name tag and HP bar.
 - **Tilt:** the hat is rotated by the head roll, measured as the angle of the line between the two
   iris centres (landmarks 468 and 473).
-- **No effect on play:** the hat lies inside the head hitbox (section 5.1), so shooting it counts as
-  a headshot, but it adds nothing to the hitbox.
+- **No effect on play:** the hat adds nothing to the hitbox. Its brim and lower crown lie inside the
+  head circle (section 5.1), so a shot there is a headshot. The top of the crown reaches about
+  `0.19 ×` the face height above the face box and the circle only about `0.1 ×`, so a shot through
+  only the top of the crown misses.
 - **When it is missing:** no face detected (the head hitbox then uses the nose), or a face box
   smaller than 8 px.
 
