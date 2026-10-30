@@ -48,7 +48,9 @@ def hat_rise() -> int:
 
 def test_a_face_behind_the_wall_shows_nothing():
     # Low enough that the top of the hat, which rises above the face, is behind the wall too.
-    assert np.array_equal(picture(make_face(WALL_TOP + 130.0)), picture(None))
+    top = WALL_TOP + hat_rise() + 1
+    assert top < HEIGHT, "the face must still be on screen for this test to mean anything"
+    assert np.array_equal(picture(make_face(top)), picture(None))
 
 
 def test_a_face_crossing_the_wall_is_cut_off_at_its_top_edge():
