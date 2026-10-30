@@ -28,13 +28,12 @@ FLASH, FLASH_ALPHA = (60, 60, 255), 0.3
 
 SOOT, BLOOD = (75, 80, 92), (25, 25, 140)
 HOLE_RING, HOLE_CORE = (40, 45, 60), (8, 8, 10)
-SKIN, CLOTH, SEAM = (140, 170, 215), (215, 225, 235), (165, 175, 190)
+CLOTH, SEAM = (215, 225, 235), (165, 175, 190)
 # (layer, colour, strength, multiply, softness) in drawing order. Multiplied layers darken what is
 # underneath so the texture of the cloth shows through; the others cover it. Softness scales the blur
 # of the edge: smudges are softer than holes and cuts.
 COMPOSITE = (
     ("soot", SOOT, 0.55, True, 4.0),
-    ("skin", SKIN, 0.9, False, 1.0),
     ("cloth", CLOTH, 0.92, False, 1.0),
     ("seam", SEAM, 0.5, True, 1.0),
     ("ring", HOLE_RING, 0.7, True, 1.0),
@@ -80,9 +79,6 @@ HOLE_SPLITS = [
     for u, v in HOLES
 ]
 TORSO_DUST = [ellipse(-0.5, 0.55, 0.35, 0.1, BLOB_JITTER), ellipse(0.5, 0.2, 0.25, 0.07, BLOB_JITTER[::-1])]
-TEAR = np.array(
-    [(-0.85, 0.12), (-0.6, 0.2), (-0.5, 0.14), (-0.3, 0.3), (-0.45, 0.34), (-0.4, 0.5), (-0.75, 0.42)]
-)
 STAIN = ellipse(0.25, 0.62, 0.3, 0.1, BLOB_JITTER)
 STAIN_CORE = ellipse(0.25, 0.64, 0.18, 0.06, BLOB_JITTER[::-1])
 DRIPS = [np.array([[u, 0.7], [u, v]]) for u, v in ((0.15, 0.92), (0.3, 0.85))]
@@ -272,9 +268,6 @@ def composite(view: np.ndarray, marks: Marks, feather: float) -> None:
 def draw_torso(marks: Marks, frame, stage: int, line: int) -> None:
     for patch in TORSO_DUST:
         marks.fill("soot", patch, frame)
-    if stage >= 2:
-        marks.fill("skin", TEAR, frame)
-        marks.stroke("ring", TEAR, frame, line, closed=True)
     if stage >= 3:
         marks.fill("blood", STAIN, frame)
         marks.fill("blood_core", STAIN_CORE, frame)
