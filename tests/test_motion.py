@@ -1,7 +1,7 @@
 import numpy as np
 
 from highnoon.config import FilterConfig
-from highnoon.contracts import HandObservation, Player, PoseObservation
+from highnoon.contracts import FaceObservation, HandObservation, Player, PoseObservation
 from highnoon.vision.motion import HAND_HOLD_S, MotionFilter
 
 L_WRIST, R_WRIST = 15, 16
@@ -131,3 +131,16 @@ def test_aim_smoothing_reduces_jitter_and_follows_swings():
         p = player({R_WRIST: hand(pointer=(90, 0))})
         mf.update([p], i / 30, set())
     assert abs(angle(p.signals)) < 5
+
+
+def test_face_landmarks_are_smoothed_and_dropped_with_the_face():
+    mf = MotionFilter(FilterConfig())
+    landmarks = np.full((478, 2), 100.0, np.float32)
+    p = Player(id=1, face=FaceObservation(landmarks, np.array([90, 90, 110, 110], np.float32)), visible=True)
+    mf.update([p], 0.0, set())
+    p.face = FaceObservation(landmarks + 4.0, p.face.bbox)
+    mf.update([p], 1 / 30, set())
+    assert np.all((p.face_smoothed > 100.0) & (p.face_smoothed < 104.0))
+    p.face = None
+    mf.update([p], 2 / 30, set())
+    assert p.face_smoothed is None

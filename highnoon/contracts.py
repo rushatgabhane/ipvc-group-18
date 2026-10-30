@@ -74,6 +74,7 @@ class Player:
     id: int
     pose: PoseObservation | None = None
     face: FaceObservation | None = None
+    face_smoothed: np.ndarray | None = None
     hands: dict[int, HandObservation] = field(default_factory=dict)
     smoothed: np.ndarray | None = None
     signals: MotionSignals | None = None

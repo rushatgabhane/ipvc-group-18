@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 from highnoon.config import DisplayConfig
-from highnoon.contracts import Perception, Player
+from highnoon.contracts import FaceObservation, Perception, Player
 from highnoon.core.profiler import Profiler
 from highnoon.game.game import Game
 from highnoon.render import assets
@@ -14,7 +14,6 @@ from highnoon.render.fx import FX
 from highnoon.render.hud import Hud, draw_signal_debug
 from highnoon.render.palette import PLAYER_COLORS, WHITE
 from highnoon.render.scenery import Scenery
-from highnoon.render.wildlife import Wildlife
 from highnoon.render.world import WorldView
 
 TORSO_BONES = [(11, 12), (11, 23), (12, 24), (23, 24)]
@@ -37,7 +36,6 @@ class Renderer:
         self.world = WorldView(PLAYER_COLORS, self.text, self.fx)
         self.hud = Hud(PLAYER_COLORS, self.text, self.fx)
         self.scenery = Scenery()
-        self.wildlife = Wildlife()
         self.shake = (0, 0)
         self._t_last: float | None = None
 
@@ -73,12 +71,14 @@ class Renderer:
                 state = game.states.get(player.id)
                 if state is not None:
                     hp_fraction = state.hp / game.cfg.max_hp
-                    draw_face_damage(image, player.face, player.id, hp_fraction, t - state.last_hit_t)
+                    face = player.face
+                    if player.face_smoothed is not None:
+                        face = FaceObservation(player.face_smoothed, face.bbox)
+                    draw_face_damage(image, face, player.id, hp_fraction, t - state.last_hit_t)
                 color = PLAYER_COLORS.get(player.id, WHITE)
                 self.face_fx.draw(image, player.face, color)
 
         self.fx.update(t, game.effects)
-        self.wildlife.draw(image, game, players, t, dt)
         self.world.draw(image, game, t, dt)
         self.hud.draw(image, game, players, t, dt)
 

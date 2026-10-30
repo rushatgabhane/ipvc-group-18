@@ -1,7 +1,7 @@
 # HIGH NOON: Game mechanics
 
 This describes the game as of commit `f126045` ("moved the structure"), which adds practice mode,
-the scenery damage and dusk, the vultures and the face hat to what was there at `3a83e02`, plus
+the scenery damage and dusk and the face hat to what was there at `3a83e02`, plus
 the facial degradation (section 6c) added on top of it.
 Every number comes from `GameConfig` in `highnoon/config.py` or from a constant in the module named
 next to it. Distances given as a fraction of the screen use the frame height `H` or width `W` in the
@@ -227,7 +227,7 @@ The game starts at `max_hp = 100`. When a player fires, the weapon is chosen in 
   - floating damage numbers
   - BLOCKED and SAFE!
   - explosions with particles and screen shake
-  - the scenery, vultures, facial damage and hat described in sections 6b and 6c
+  - the scenery, facial damage and hat described in sections 6b and 6c
 - **Sound** (`render/sound.py`, `--mute` turns it off): recorded effects for the revolver, rocket
   launch, grenade throw, explosion, reload, dry-fire click and the 3-2-1 click, plus announcer
   voices for "FIGHT!" and "K.O.". Credits are in `assets/CREDITS.md`.
@@ -237,7 +237,7 @@ The game starts at `max_hp = 100`. When a player fires, the weapon is chosen in 
 - **Debug overlay (`d`):** the skeleton, the live signal values against their thresholds (hand
   openness, aim, head position), and the reason for the last ignored fist.
 
-Keys: `q`/`esc` quit, `r` restart the round, `d` debug overlay, `b` toggle the background,
+Keys: `q`/`esc` quit, `r` restart the round, `h` simulate a hit (every player loses 25% of max HP, never below 1), `d` debug overlay, `b` toggle the background,
 `f` fullscreen. The `--mute` flag turns the sound off.
 
 ## 6a. Evaluation log (`highnoon/core/match_log.py`)
@@ -250,7 +250,7 @@ shots, powerups, reloads, dry fires, ducks, time ducked, time aiming, the share 
 tracked hand, fists (with how many fell in cooldown and the share that fired) and the counts of
 ignored fists by reason. Practice mode does not write this log.
 
-## 6b. Scenery and ambient effects (`render/scenery.py`, `render/wildlife.py`)
+## 6b. Scenery and ambient effects (`render/scenery.py`)
 
 These only change the picture; none of them affect the rules.
 
@@ -264,9 +264,6 @@ These only change the picture; none of them affect the rules.
   The target is the larger of (time since the round started ÷ 90 s) and (the HP lost by the most
   hurt player ÷ max HP). The sky eases towards it at 0.4 per second and goes back to day outside
   the duel.
-- **Vultures:** when a visible player is at or below `35%` of max HP during a duel, three vultures
-  fade in near the top of the screen and circle above the weakest such player, following them
-  sideways. They fade out over 1 s once nobody is that low.
 
 ## 6c. Face effects (`render/face_damage.py`, `render/face_fx.py`)
 
@@ -277,7 +274,7 @@ not enabled.
 
 The effects are drawn on top of the wall, because the face is still tracked behind it. A ducked
 player's hat and marks therefore show on the wall wherever their face is. Everything else in the
-scene (vultures, weapons and projectiles, HUD) is drawn over the face effects.
+scene (weapons and projectiles, HUD) is drawn over the face effects.
 
 ### Facial degradation
 
@@ -288,29 +285,49 @@ reset for the next round.
 | HP | Injuries |
 |---|---|
 | 100–76 | none |
-| 75–51 | a scraped cheek on one side, and grime on the jaw and lower cheek on the other |
-| 50–26 | adds a bruise under one eye (dark centre, purple, then a yellow-green rim) and a cut with swollen skin on that cheek |
-| 25–0 | adds a black eye on the other side, a nosebleed running over the lips to the chin, a split lower lip and a pale, drained complexion (20% towards gray) |
+| 75–51 | blood spatter on the cheek of one side |
+| 50–26 | adds a black eye on the other side (dark purple around the eye socket, darkest under the eye, fading to yellow at the rim) and a bloody graze on that cheekbone |
+| 25–0 | adds a nosebleed and a pale, drained complexion (20% towards gray) |
 
-- **Warped onto the mesh:** the injuries are painted once into a flat texture of the face, in the UV
+- **Real photos, not drawings:** the bruises and blood come from photographs on Wikimedia Commons
+  (see `assets/CREDITS.md`). `tools/make_face_decals.py` turns each into a decal in
+  `assets/sprites/face/`: the bruises are stored relative to the surrounding skin of the photo, so
+  only the discolouration is kept, and the blood is kept as a deep red multiplier with its spatter as
+  coverage. The black eye takes its colour and mottling from a bruise photo, shaped like the eye
+  socket.
+- **Warped onto the mesh:** the decals are placed once into a flat texture of the face, in the UV
   layout of MediaPipe's canonical face model (`assets/face_mesh.npz`, built by
-  `tools/build_face_mesh.py`). Each of the 852 mesh triangles maps its part of the texture onto the
-  tracked landmarks, so the injuries bend, stretch and turn with the face. Eyes and mouth are holes
-  in the mesh, so they are never painted over.
+  `tools/build_face_mesh.py`). Mesh triangles map their part of the texture onto the tracked
+  landmarks, so the injuries bend, stretch and turn with the face. Eyes and mouth are holes in the
+  mesh, so they are never painted over.
 - **Blended into the skin:** the texture multiplies the camera image instead of being drawn over it,
   so the player's own skin detail and lighting show through. The marks fade out towards the edge of
   the mesh, so no outline shows.
+- **Smoothed:** the injuries follow the face landmarks after a One Euro filter (`FACE_MIN_CUTOFF = 1`,
+  `FACE_BETA = 0.08` in `vision/motion.py`), so they do not jitter on a still face but keep up with
+  fast head movement. The hat and the hit boxes use the raw landmarks.
 - **Hit flash:** all damage also reddens the face, including each camping drain tick. Blue and green
   drop by up to 18% and recover over `0.25` s (the same time as the HUD card flash).
-- **Turning away:** triangles facing away from the camera are not drawn, and the nose covers the far
-  cheek, so injuries on the far side disappear as the head turns.
+- **Turning away:** triangles facing away from the camera are not drawn. When the head is turned (the
+  nose tip more than 12% of the face width from the middle of the cheeks), the nearest 250 triangles
+  (nose and middle of the face) are drawn over the painted ones, so the nose covers the far cheek.
 - **Sides:** Player 1's bruise is on the left of the image and Player 2's on the right (the same
   texture mirrored), so the two players look different.
 - **Skipped when:** no face is detected, or the face is less than 24 px wide.
-- **Cost:** the warp runs at a face width of at most 110 px and is scaled up. A new camera frame
-  takes about 2.5–5 ms per face, and a redraw between camera frames about 0.3–2.7 ms, because the
-  warp is reused (measured on a photo with faces 119 and 238 px wide). The textures are painted when
-  the renderer starts, so the first hit does not stall a frame.
+- **Cost:** only the triangles that carry an injury are rasterized (15, 131 and 155 of 852 for the
+  three stages), at a face width of at most 110 px, then scaled up. The warped texture is kept until
+  the next camera frame, so a redraw in between is only a multiply. Measured on a 150 px face (M1 Pro):
+
+  | Stage | New camera frame | Redraw between frames |
+  |---|---|---|
+  | 1 | 0.30 ms | 0.03 ms |
+  | 2 | 0.44 ms | 0.03 ms |
+  | 3 | 0.64 ms | 0.07 ms |
+  | 3 + hit flash | 0.89 ms | 0.30 ms |
+
+  The previous procedural version took 2.4 ms and 0.9 ms on a 134 px face at stage 3 with a flash; this
+  one takes 1.1 ms and 0.36 ms on the same face. The textures are painted when the renderer starts, so
+  the first hit does not stall a frame.
 
 ### Hat
 
@@ -331,7 +348,7 @@ facial damage.
 
 The facial degradation and the hat are the only effects drawn from face landmarks. The other
 effects around a player's head or body (the name tag and HP bar, the red flash of the HUD card,
-`-N` damage numbers, HEADSHOT!, the camping drain and the vultures) come from the face box or the
+`-N` damage numbers, HEADSHOT! and the camping drain) come from the face box or the
 pose. Like the facial degradation, most of them need the player to take damage (see section 9 for
 why that only happens through bombs in practice mode).
 
@@ -403,8 +420,8 @@ from every hit test (`self.cfg.practice` checks in `_hit_fractions` and `_explod
 and `_opponent_of()` returns `None`. So no bullet, rocket, grenade or camping drain can hurt them.
 The player effects that react to damage only appear after the player shoots bombs. These are the
 red face and HUD-card flash, the `-N` numbers on the body, the facial degradation, the dusk caused
-by lost HP and the vultures at 35 HP or less. Each bomb (25 HP) moves the face exactly one
-degradation stage, and the third bomb also brings the vultures. HEADSHOT! never appears in
+by lost HP. Each bomb (25 HP) moves the face exactly one
+degradation stage. HEADSHOT! never appears in
 practice. The hat does not depend on damage, so it is always drawn. The scenery
 effects (bullet holes, scorch marks, glass on the rail) do appear in practice whenever the player
 hits the wall, fires a rocket or breaks a bottle.

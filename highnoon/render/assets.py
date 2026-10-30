@@ -318,34 +318,6 @@ def draw_bomb_icon(canvas: np.ndarray, c: int, k: float) -> None:
     )
 
 
-@lru_cache(maxsize=8)
-def vulture_sprite(wingspan: int, wings_up: bool, facing_right: bool) -> Sprite:
-    width, height = wingspan, int(wingspan * 0.5)
-    canvas, w, h = supersampled(width, height)
-    body, head = (30, 32, 40, 255), (90, 110, 200, 255)
-    cx, cy = w // 2, int(h * 0.55)
-    tip_y = int(h * 0.08) if wings_up else int(h * 0.62)
-    elbow_y = int(h * 0.3) if wings_up else int(h * 0.45)
-    for side in (-1, 1):
-        wing = np.array(
-            [
-                [cx, cy - h * 0.06],
-                [cx + side * w * 0.22, elbow_y],
-                [cx + side * w * 0.5, tip_y],
-                [cx + side * w * 0.3, elbow_y + h * 0.16],
-                [cx, cy + h * 0.1],
-            ],
-            np.int32,
-        )
-        cv2.fillPoly(canvas, [wing], body, cv2.LINE_AA)
-    cv2.ellipse(canvas, (cx, cy), (int(w * 0.11), int(h * 0.13)), 0, 0, 360, body, -1, cv2.LINE_AA)
-    cv2.circle(canvas, (int(cx + w * 0.11), int(cy - h * 0.08)), int(h * 0.07), head, -1, cv2.LINE_AA)
-    sprite = downsample(canvas, width, height)
-    if facing_right:
-        return sprite
-    return Sprite.from_bgra(np.ascontiguousarray(sprite.bgra[:, ::-1]))
-
-
 @lru_cache(maxsize=4)
 def bottle_sprite(height: int) -> Sprite:
     width = int(height * 0.42)

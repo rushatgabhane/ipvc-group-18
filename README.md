@@ -80,7 +80,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m highnoon --practice      # solo mode: shoot bottles to test the mechanics
 ```
 
-Keys: `q`/`esc` quit, `r` restart round, `d` debug overlay (skeleton, signal values, timings;
+Keys: `q`/`esc` quit, `r` restart round, `h` simulate a hit (cuts 25% HP, to test the face damage), `d` debug overlay (skeleton, signal values, timings;
 off by default), `b` toggle background, `f` fullscreen. Sound effects are on; `--mute` turns them off.
 
 ## How to play

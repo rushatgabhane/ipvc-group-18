@@ -13,5 +13,7 @@
 | `sounds/dry_fire.wav` | [Gun Reload Sound Effects](https://opengameart.org/content/gun-reload-sound-effects) (`singlebullet1`, the first click only, 48 ms) | Brian MacIntosh (BMacZero) | CC0 1.0 |
 | `sounds/fight.wav`, `ko.wav` | [DRAGON - Announcer Audio Pack](https://opengameart.org/node/162713) (`02. Fight`, `17. K.O.`; trimmed, level-matched) | VoiceBosch | CC BY-SA 4.0 (these two files, and any changes to them, stay under CC BY-SA 4.0) |
 | `face_mesh.npz` | UV layout from MediaPipe's [`canonical_face_model.obj`](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/modules/face_geometry/data/canonical_face_model.obj) and its face tessellation, built by `tools/build_face_mesh.py` | Google | Apache 2.0 |
+| `sprites/face/shiner.png` | [Bruise - ring resolution.jpg](https://commons.wikimedia.org/wiki/File:Bruise_-_ring_resolution.jpg) (top-left panel, made relative to the surrounding skin, used as the colour and mottling of an eye-socket shaped bruise by `tools/make_face_decals.py`) | Clarinetguy097 | CC0 1.0 |
+| `sprites/face/blood_spray.png` | [Bloodspray big.png](https://commons.wikimedia.org/wiki/File:Bloodspray_big.png) (cropped, recoloured to a multiply decal) | Mia Rosado (BlueRoseSonata) | CC BY 4.0 |
 
 `sounds/grenade_throw.wav` is a band-passed noise swoosh generated for this project.

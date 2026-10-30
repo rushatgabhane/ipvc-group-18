@@ -25,6 +25,8 @@ SHOULDER_WIDTH_PER_TORSO = 0.8
 DEFAULT_TORSO_PX = 200.0
 AIM_MIN_CUTOFF = 0.8
 AIM_BETA = 0.6
+FACE_MIN_CUTOFF = 1.0
+FACE_BETA = 0.08
 
 
 @dataclass
@@ -46,6 +48,7 @@ class MotionFilter:
     def __init__(self, cfg: FilterConfig):
         self.cfg = cfg
         self._keypoint_filters: dict[int, OneEuroFilter] = {}
+        self._face_filters: dict[int, OneEuroFilter] = {}
         self._aiming_hand: dict[int, int] = {}
         self._torso_len: dict[int, float] = {}
         self._aim: dict[int, SmoothedAim] = {}
@@ -55,6 +58,7 @@ class MotionFilter:
         for player in players:
             if player.id in reassigned:
                 self._forget(player.id)
+            self._smooth_face(player, t)
             if player.pose is None:
                 player.signals = None
                 continue
@@ -67,11 +71,20 @@ class MotionFilter:
 
     def _forget(self, player_id: int) -> None:
         self._keypoint_filter(player_id).reset()
+        self._face_filters.pop(player_id, None)
         self._aiming_hand.pop(player_id, None)
         self._torso_len.pop(player_id, None)
         self._aim.pop(player_id, None)
         for wrist in WRISTS:
             self._last_palm.pop((player_id, wrist), None)
+
+    def _smooth_face(self, player: Player, t: float) -> None:
+        if player.face is None:
+            self._face_filters.pop(player.id, None)
+            player.face_smoothed = None
+            return
+        face_filter = self._face_filters.setdefault(player.id, OneEuroFilter(FACE_MIN_CUTOFF, FACE_BETA))
+        player.face_smoothed = face_filter(player.face.landmarks, t)
 
     def _keypoint_filter(self, player_id: int) -> OneEuroFilter:
         if player_id not in self._keypoint_filters:
