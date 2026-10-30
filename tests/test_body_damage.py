@@ -98,3 +98,11 @@ def test_tiny_torsos_are_skipped():
     image = blank()
     draw_body_damage(image, player, 0.2, math.inf)
     assert np.all(image == 128)
+
+
+def test_low_hp_drains_the_colour_from_the_player_but_not_the_background():
+    image = np.full((400, 400, 3), (50, 100, 200), np.uint8)
+    draw_body_damage(image, make_player(), 0.2, math.inf, person_mask())
+    spread = lambda pixel: int(pixel.max()) - int(pixel.min())  # noqa: E731
+    assert spread(image[70, 115]) < 150  # on the person, clear of the marks
+    assert spread(image[70, 20]) == 150  # background in the same region
