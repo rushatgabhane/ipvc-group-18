@@ -8,6 +8,7 @@ from highnoon.contracts import Perception, Player
 from highnoon.core.profiler import Profiler
 from highnoon.game.game import Game
 from highnoon.render import assets
+from highnoon.render.body_damage import draw_body_damage, player_columns
 from highnoon.render.face_damage import draw_face_damage
 from highnoon.render.face_fx import FaceEffectRenderer
 from highnoon.render.fx import FX
@@ -39,6 +40,7 @@ class Renderer:
         self.wildlife = Wildlife()
         self.shake = (0, 0)
         self._t_last: float | None = None
+        self._mask: np.ndarray | None = None
 
     def render(
         self, perception: Perception, players: list[Player], game: Game, profiler: Profiler
@@ -52,7 +54,11 @@ class Renderer:
         if self.scenery.build(width, height, game.cfg.cover_height):
             self.hud.prewarm(height)
         self.scenery.update(game)
-        base = self._camera_layer(frame.image, perception.mask)
+        mask = perception.mask
+        if mask is not None and mask.shape != (height, width):
+            mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR)
+        self._mask = mask
+        base = self._camera_layer(frame.image, mask)
         if self.cfg.show_debug:
             for player in players:
                 if player.visible:
@@ -67,9 +73,20 @@ class Renderer:
         self._t_last = t
         image = self._base.copy()
 
+        columns = player_columns(players)
         for player in players:
+            state = game.states.get(player.id)
+            if player.visible and state is not None and player.id in columns:
+                draw_body_damage(
+                    image,
+                    player,
+                    state.hp / game.cfg.max_hp,
+                    t - state.last_hit_t,
+                    self._mask,
+                    columns[player.id],
+                    self.scenery.wall_top,
+                )
             if player.visible and player.face is not None:
-                state = game.states.get(player.id)
                 if state is not None:
                     hp_fraction = state.hp / game.cfg.max_hp
                     draw_face_damage(image, player.face, player.id, hp_fraction, t - state.last_hit_t)
