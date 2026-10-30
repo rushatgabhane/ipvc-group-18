@@ -43,6 +43,11 @@ class FilterConfig:
 class TrackingConfig:
     max_match_distance: float = 0.25
     lost_timeout_s: float = 1.5
+    reid_max_distance: float = 0.5
+    reid_margin: float = 0.05
+    reid_confirm_s: float = 0.15
+    reid_blend: float = 0.01
+    enrol_max_samples: int = 90
 
 
 @dataclass
@@ -72,8 +77,9 @@ class GameConfig:
     rocket_reach: float = 0.38
     grenade_reach: float = 0.1
     round_end_s: float = 5.0
-    countdown_s: float = 3.0
-    come_back_after_s: float = 5.0
+    countdown_s: float = 5.0
+    come_back_after_s: float = 1.0
+    leave_timeout_s: float = 5.0
     powerup_interval_s: float = 15.0
     powerup_fall_s: float = 5.0
     powerup_radius: float = 0.08

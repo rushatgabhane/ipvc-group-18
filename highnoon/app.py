@@ -80,6 +80,8 @@ def run(cfg: Config) -> Profiler:
                 with profiler.stage("game"):
                     game.width, game.height = frame.size
                     game.update(players, t_game, tracker.reassigned)
+                    if game.mode == "duel":
+                        tracker.lock()
                 if recorder is not None:
                     recorder.add(frame.image)
                 if signal_log is not None:
