@@ -159,7 +159,7 @@ The game starts at `max_hp = 100`. When a player fires, the weapon is chosen in 
 - **Damage:** **body 10**, **head 25**. From full HP that is 10 body hits or 4 headshots.
 - **Origin:** the muzzle (`gun_reach` from the wrist, along the aim). The bullet is drawn as a copper
   bullet with a faint streak.
-- **Travel time:** a bullet arrives `bullet_travel_s = 0.45` s after the shot. When it arrives, the
+- **Travel time:** a bullet arrives `bullet_travel_s = 0.6` s after the shot. When it arrives, the
   ray is cast again from the original muzzle position, in the original direction, against the **current**
   positions. A player who ducks or moves away during that time dodges it.
 - **What it hits:** whatever the ray meets first:
@@ -278,33 +278,36 @@ scene (vultures, weapons and projectiles, HUD) is drawn over the face effects.
 
 ### Facial degradation
 
-The face picks up cartoon damage as HP drops. The look depends only on current HP, so it builds up
-from any kind of damage (bullets, rocket splash, grenades, camping, bombs) and is gone when HP is
+The face picks up realistic injuries as HP drops. The look depends only on current HP, so it builds
+up from any kind of damage (bullets, rocket splash, grenades, camping, bombs) and is gone when HP is
 reset for the next round.
 
-| HP | Marks |
+| HP | Injuries |
 |---|---|
 | 100–76 | none |
-| 75–51 | soot smudges on one cheek and on the jaw |
-| 50–26 | adds a purple bruise under one eye and a stitched red cut on that cheek |
-| 25–0 | adds a black eye on the other side, a crossed plaster on the nose bridge and a pale green tint (22% opacity) over the whole face |
+| 75–51 | a scraped cheek on one side, and grime on the jaw and lower cheek on the other |
+| 50–26 | adds a bruise under one eye (dark centre, purple, then a yellow-green rim) and a cut with swollen skin on that cheek |
+| 25–0 | adds a black eye on the other side, a nosebleed running over the lips to the chin, a split lower lip and a pale, drained complexion (20% towards gray) |
 
-- **Hit flash:** all damage also tints the face red, including each camping drain tick. The tint
-  starts at 45% opacity and fades over `0.25` s (the same time as the HUD card flash).
-- **Cartoon style:** flat colours with dark outlines, drawn at 90% opacity, so the marks stay
-  readable on a low-quality camera.
-- **Follows the head:** each mark is defined in a small frame built from nearby landmarks (the eye
-  corners, lower lid and cheek for the eyes and cheeks; the nose bridge, inner eye corners and
-  nose tip for the plaster). The marks move, scale, tilt and squash with the face as the head
-  turns or nods.
-- **Turning away:** when one eye looks less than `45%` as wide as the other, that side is turned
-  away, and its marks are hidden. The plaster and the tints are always drawn.
-- **Sides:** Player 1 is bruised under the left eye of the image and Player 2 under the right, so
-  the two players look different.
+- **Warped onto the mesh:** the injuries are painted once into a flat texture of the face, in the UV
+  layout of MediaPipe's canonical face model (`assets/face_mesh.npz`, built by
+  `tools/build_face_mesh.py`). Each of the 852 mesh triangles maps its part of the texture onto the
+  tracked landmarks, so the injuries bend, stretch and turn with the face. Eyes and mouth are holes
+  in the mesh, so they are never painted over.
+- **Blended into the skin:** the texture multiplies the camera image instead of being drawn over it,
+  so the player's own skin detail and lighting show through. The marks fade out towards the edge of
+  the mesh, so no outline shows.
+- **Hit flash:** all damage also reddens the face, including each camping drain tick. Blue and green
+  drop by up to 18% and recover over `0.25` s (the same time as the HUD card flash).
+- **Turning away:** triangles facing away from the camera are not drawn, and the nose covers the far
+  cheek, so injuries on the far side disappear as the head turns.
+- **Sides:** Player 1's bruise is on the left of the image and Player 2's on the right (the same
+  texture mirrored), so the two players look different.
 - **Skipped when:** no face is detected, or the face is less than 24 px wide.
-- **Cost:** about 0.2 ms per face at the first stage and up to about 0.5 ms at the last stage with
-  a hit flash (measured on synthetic 90 and 180 px faces in a 1280×720 frame). Only the area around
-  the face is blended.
+- **Cost:** the warp runs at a face width of at most 110 px and is scaled up. A new camera frame
+  takes about 2.5–5 ms per face, and a redraw between camera frames about 0.3–2.7 ms, because the
+  warp is reused (measured on a photo with faces 119 and 238 px wide). The textures are painted when
+  the renderer starts, so the first hit does not stall a frame.
 
 ### Hat
 
@@ -339,7 +342,7 @@ why that only happens through bombs in practice mode).
 | Cover | `cover_height`, `duck_margin` | 0.25, 0.015 |
 | Ammo | `max_ammo`, `reload_s` | 3, 0.8 s |
 | Camping | `camp_warning_s`, `camp_grace_s`, `camp_drain_fraction`, `camp_drain_interval_s` | 5 s, 7 s, 0.05, 1 s |
-| Damage | `max_hp`, `body_damage`, `head_damage`, `bullet_travel_s` | 100, 10, 25, 0.45 s |
+| Damage | `max_hp`, `body_damage`, `head_damage`, `bullet_travel_s` | 100, 10, 25, 0.6 s |
 | Flow | `countdown_s`, `round_end_s`, `come_back_after_s` | 3, 5, 5 s |
 | Weapon reach | `hand_reach`, `gun_reach`, `rocket_reach`, `grenade_reach` | 0.06, 0.27, 0.38, 0.1 (x H) |
 | Display | `render_hz` | 60 |

@@ -1,76 +1,66 @@
 from __future__ import annotations
 
-import math
+from functools import cache, lru_cache
 
 import cv2
 import numpy as np
 
 from highnoon.contracts import FaceObservation
+from highnoon.render.assets import ASSET_DIR
 
-# Cartoon damage drawn on the face as HP drops. Every mark is defined in a small frame spanned by
-# nearby landmarks, so it follows the face when the head moves, tilts or turns.
+# Injuries painted once into a flat texture of the face (MediaPipe's canonical UV layout), then warped
+# onto the tracked mesh triangle by triangle. The texture multiplies the camera image, so the skin
+# keeps its own pores, shadows and lighting instead of being covered by a sticker.
 STAGE_HP = (0.75, 0.5, 0.25)
 HIT_FLASH_S = 0.25
 MIN_FACE_PX = 24
-ROI_PAD = 0.25
-MARK_ALPHA = 0.9
-SICK_ALPHA = 0.22
-FLASH_ALPHA = 0.45
-TURNED_AWAY_RATIO = 0.45
+ROI_PAD = 0.05
 FACE_MESH_POINTS = 468
 
-# (outer eye corner, inner eye corner, lower lid, cheek) for each side of the face
-EYE_SIDES = ((33, 133, 145, 50), (263, 362, 374, 280))
-NOSE = (6, 133, 362, 1)  # bridge, both inner eye corners, tip
+# The warp runs at this face width at most and is scaled up to fit, so its cost does not grow with
+# the face. The marks are soft, so nothing is lost.
+WORK_FACE_PX = 110
+PALLOR = 0.2
+FLASH_TINT = np.array([0.55, 0.55, 1.0], np.float32)
+FLASH_STRENGTH = 0.4
+BASE_SIZE = 512
+TEXTURE_SIZE = 256
+SKIN_FEATHER = 0.035
 
-SOOT = (55, 60, 70)
-BRUISE, BRUISE_EDGE = (160, 60, 135), (90, 25, 75)
-SHINER, SHINER_EDGE = (70, 25, 60), (20, 10, 20)
-BLOOD, SCAR_EDGE = (40, 40, 215), (25, 20, 60)
-PLASTER, PLASTER_EDGE, PLASTER_PAD = (150, 200, 235), (40, 70, 110), (110, 160, 205)
-SICK = (150, 205, 170)
-FLASH = (60, 60, 255)
+with np.load(ASSET_DIR / "face_mesh.npz") as _mesh:
+    UV, TRIANGLES = _mesh["uv"], _mesh["triangles"]
 
-BLOB_JITTER = np.array([1.0, 0.8, 1.1, 0.9, 1.15, 0.85, 1.0, 0.75, 1.1, 0.95, 1.2, 0.8, 1.0, 0.9])
+# The last warp per player. The game draws at 60 Hz but the landmarks only change per camera frame.
+_warps: dict[int, tuple] = {}
 
+# Landmarks the injuries are anchored to. Player 1's bruise is on the left of the image; Player 2 gets
+# the texture mirrored, which works because the UV layout is symmetric.
+HURT_LID, HURT_CHEEK = 145, 50
+OTHER_CHEEK, OTHER_OUTER_EYE, OTHER_INNER_EYE = 280, 263, 362
+HURT_JAW, HURT_NOSTRIL, LIP_LOW = 172, 98, 14
 
-def ellipse(cx: float, cy: float, rx: float, ry: float, jitter=None, n: int = 24) -> np.ndarray:
-    angles = np.linspace(0, math.tau, n if jitter is None else len(jitter), endpoint=False)
-    scale = 1.0 if jitter is None else jitter
-    return np.stack([cx + rx * scale * np.cos(angles), cy + ry * scale * np.sin(angles)], axis=1)
-
-
-def strip(cx: float, cy: float, length: float, width: float, angle_deg: float) -> np.ndarray:
-    a = math.radians(angle_deg)
-    along, across = np.array([math.cos(a), math.sin(a)]), np.array([-math.sin(a), math.cos(a)])
-    corners = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
-    return np.array([[cx, cy] + along * length / 2 * i + across * width / 2 * j for i, j in corners])
-
-
-_ARC = np.linspace(0, math.pi, 16)
-# Eye frame: origin between the eye corners, u = half the eye width pointing outwards,
-# v = lower lid to cheek (downwards).
-CHEEK_SOOT = ellipse(0.7, 1.0, 1.1, 0.4, BLOB_JITTER)
-CHEEK_SPECKS = [ellipse(x, y, 0.12, 0.05, n=8) for x, y in ((1.9, 0.8), (-0.2, 1.3), (1.6, 1.4))]
-JAW_SOOT = ellipse(0.1, 2.4, 0.7, 0.24, BLOB_JITTER[::-1])
-BRUISE_SHAPE = np.concatenate(
-    [
-        np.stack([1.35 * np.cos(_ARC), 0.12 + 0.5 * np.sin(_ARC)], axis=1),
-        np.stack([1.1 * np.cos(_ARC), 0.12 + 0.18 * np.sin(_ARC)], axis=1)[::-1],
-    ]
-)
-SHINER_OUTER = ellipse(0.0, -0.05, 1.8, 0.6)
-SHINER_HOLE = ellipse(0.0, 0.0, 1.15, 0.22)
-CUT = np.array([[-0.2, 0.9], [0.3, 1.2], [0.8, 0.9], [1.3, 1.2], [1.8, 0.9]])
-STITCHES = [np.array([[u, 0.8], [u, 1.3]]) for u in (0.3, 0.8, 1.3)]
-# Nose frame: origin on the bridge, u = half the gap between the inner eye corners, v = bridge to tip.
-# The forehead is left alone because the hat covers most of it.
-PLASTER_STRIPS = [strip(0.0, 0.4, 1.6, 0.3, angle) for angle in (25, -25)]
-PLASTER_CENTER = ellipse(0.0, 0.4, 0.16, 0.07, n=10)
+# Multipliers for (blue, green, red); 1 leaves the skin unchanged.
+GRIME = (0.66, 0.7, 0.74)
+GRAZE = (0.6, 0.58, 0.76)
+BRUISE_RIM = (0.72, 0.9, 0.93)
+BRUISE_MID = (0.72, 0.58, 0.68)
+BRUISE_CORE = (0.62, 0.44, 0.5)
+SHINER_MID = (0.6, 0.45, 0.5)
+SHINER_CORE = (0.42, 0.28, 0.33)
+SWELLING = (0.8, 0.78, 0.96)
+BLOOD = (0.2, 0.17, 0.66)
+WOUND = (0.12, 0.08, 0.3)
 
 
 def damage_stage(hp_fraction: float) -> int:
     return sum(hp_fraction <= level for level in STAGE_HP)
+
+
+def preload_face_damage() -> None:
+    """Paints every texture up front, so the first hit of a game does not stall a frame."""
+    for stage in range(len(STAGE_HP) + 1):
+        for mirrored in (False, True):
+            injury_texture(stage, mirrored)
 
 
 def draw_face_damage(
@@ -92,76 +82,190 @@ def draw_face_damage(
     if rx1 <= rx0 or ry1 <= ry0:
         return
     roi = image[ry0:ry1, rx0:rx1]
-    local = points - np.array([rx0, ry0], np.float32)
-    if stage >= 3:
-        tint_face(roi, local, SICK, SICK_ALPHA)
+    last = _warps.get(player_id)
+    if last is not None and last[0] is face.landmarks and last[1] == roi.shape:
+        map_u, map_v = last[2], last[3]
+    else:
+        scale = min(1.0, WORK_FACE_PX / face_w)
+        work_h, work_w = max(1, round(roi.shape[0] * scale)), max(1, round(roi.shape[1] * scale))
+        map_u, map_v = uv_maps((points - np.array([rx0, ry0], np.float32)) * scale, (work_h, work_w))
+        _warps[player_id] = (face.landmarks, roi.shape, map_u, map_v)
+    texture = cv2.remap(
+        injury_texture(stage, player_id % 2 == 0),
+        map_u * (TEXTURE_SIZE - 1),
+        map_v * (TEXTURE_SIZE - 1),
+        cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(255, 255, 255, 0),
+    )
     if flash > 0.0:
-        tint_face(roi, local, FLASH, FLASH_ALPHA * flash)
-    if stage:
-        overlay = roi.copy()
-        draw_marks(overlay, local, stage, player_id, max(2, round(face_w / 70)))
-        cv2.addWeighted(overlay, MARK_ALPHA, roi, 1 - MARK_ALPHA, 0, dst=roi)
-
-
-def tint_face(roi: np.ndarray, points: np.ndarray, color, alpha: float) -> None:
-    hull = cv2.convexHull(np.round(points).astype(np.int32))
-    overlay = roi.copy()
-    cv2.fillConvexPoly(overlay, hull, color, cv2.LINE_AA)
-    cv2.addWeighted(overlay, alpha, roi, 1 - alpha, 0, dst=roi)
-
-
-def draw_marks(overlay: np.ndarray, points: np.ndarray, stage: int, player_id: int, line: int) -> None:
-    frames = [eye_frame(points, side) for side in EYE_SIDES]
-    widest = max(float(np.linalg.norm(frame[1])) for frame in frames)
-    shown = [float(np.linalg.norm(frame[1])) >= TURNED_AWAY_RATIO * widest for frame in frames]
-    hurt = 0 if player_id % 2 else 1
-    other = 1 - hurt
-
-    if shown[other]:
-        fill(overlay, CHEEK_SOOT, frames[other], SOOT)
-        for speck in CHEEK_SPECKS:
-            fill(overlay, speck, frames[other], SOOT)
-    if shown[hurt]:
-        fill(overlay, JAW_SOOT, frames[hurt], SOOT)
-    if stage >= 2 and shown[hurt]:
-        fill(overlay, BRUISE_SHAPE, frames[hurt], BRUISE, BRUISE_EDGE, line)
-        stroke(overlay, CUT, frames[hurt], SCAR_EDGE, line + 3)
-        stroke(overlay, CUT, frames[hurt], BLOOD, line)
-        for stitch in STITCHES:
-            stroke(overlay, stitch, frames[hurt], SCAR_EDGE, max(1, line - 1))
+        skin = texture[:, :, 3:].astype(np.float32) / 255
+        tinted = texture[:, :, :3] * (1 - skin * FLASH_STRENGTH * flash * (1 - FLASH_TINT))
+        texture[:, :, :3] = tinted.astype(np.uint8)
+    full_size = (roi.shape[1], roi.shape[0])
     if stage >= 3:
-        if shown[other]:
-            outer = to_image(SHINER_OUTER, frames[other])
-            hole = to_image(SHINER_HOLE, frames[other])
-            cv2.fillPoly(overlay, [outer, hole], SHINER, cv2.LINE_AA)
-            cv2.polylines(overlay, [outer], True, SHINER_EDGE, line, cv2.LINE_AA)
-        nose = nose_frame(points)
-        for piece in PLASTER_STRIPS:
-            fill(overlay, piece, nose, PLASTER, PLASTER_EDGE, line)
-        fill(overlay, PLASTER_CENTER, nose, PLASTER_PAD)
+        skin = cv2.resize(texture[:, :, 3], full_size, interpolation=cv2.INTER_LINEAR)
+        roi[:] = drain_colour(roi, (skin[:, :, None] * PALLOR).astype(np.uint16))
+    shade = cv2.resize(texture[:, :, :3], full_size, interpolation=cv2.INTER_LINEAR)
+    cv2.multiply(roi, shade, dst=roi, scale=1 / 255)
 
 
-def eye_frame(points: np.ndarray, side: tuple[int, int, int, int]):
-    outer, inner, lid, cheek = points[list(side)]
-    return (outer + inner) / 2, (outer - inner) / 2, cheek - lid
+def drain_colour(roi: np.ndarray, amount: np.ndarray) -> np.ndarray:
+    """Blends towards gray, with amount in 0..255."""
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)[:, :, None].astype(np.uint16)
+    return ((roi * (255 - amount) + gray * amount) // 255).astype(np.uint8)
 
 
-def nose_frame(points: np.ndarray):
-    bridge, inner_a, inner_b, tip = points[list(NOSE)]
-    return bridge, (inner_b - inner_a) / 2, tip - bridge
+def uv_maps(points: np.ndarray, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    """For every ROI pixel, where in the texture it comes from. Pixels off the mesh get -1."""
+    corners = points[TRIANGLES]
+    origin = corners[:, 0]
+    a, b = corners[:, 1] - origin, corners[:, 2] - origin
+    det = a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]
+
+    # The mesh is wound consistently, so a flipped or vanishing triangle is turned away from the camera.
+    facing = np.flatnonzero(det > 1e-3)
+    owner = np.zeros(shape, np.int16)
+    pixels = np.round(corners).astype(np.int32)
+    for index in facing.tolist():
+        cv2.fillConvexPoly(owner, pixels[index], index + 1)
+    rows, cols = np.nonzero(owner)
+    tri = owner[rows, cols] - 1
+
+    # Each triangle's affine map from screen to texture.
+    uv_corners = UV[TRIANGLES[tri]]
+    du, dv = uv_corners[:, 1] - uv_corners[:, 0], uv_corners[:, 2] - uv_corners[:, 0]
+    dx, dy = cols - origin[tri, 0], rows - origin[tri, 1]
+    s = (dx * b[tri, 1] - dy * b[tri, 0]) / det[tri]
+    r = (dy * a[tri, 0] - dx * a[tri, 1]) / det[tri]
+    mapped = uv_corners[:, 0] + s[:, None] * du + r[:, None] * dv
+
+    map_u, map_v = np.full(shape, -1.0, np.float32), np.full(shape, -1.0, np.float32)
+    map_u[rows, cols], map_v[rows, cols] = mapped[:, 0], mapped[:, 1]
+    return map_u, map_v
 
 
-def to_image(shape: np.ndarray, frame) -> np.ndarray:
-    origin, u, v = frame
-    return np.round(origin + shape[:, :1] * u + shape[:, 1:] * v).astype(np.int32)
+@cache
+def injury_texture(stage: int, mirrored: bool) -> np.ndarray:
+    """BGR multipliers plus a skin mask in alpha, all stored as 0..255."""
+    skin = skin_mask()
+    faded = 255 - (255 - paint_stage(stage).astype(np.float32)) * (skin[:, :, None] / 255)
+    texture = np.dstack([faded.astype(np.uint8), skin])
+    if mirrored:
+        texture = texture[:, ::-1]
+    return cv2.resize(texture, (TEXTURE_SIZE, TEXTURE_SIZE), interpolation=cv2.INTER_AREA)
 
 
-def fill(overlay: np.ndarray, shape: np.ndarray, frame, color, edge=None, line: int = 0) -> None:
-    polygon = to_image(shape, frame)
-    cv2.fillPoly(overlay, [polygon], color, cv2.LINE_AA)
-    if edge is not None:
-        cv2.polylines(overlay, [polygon], True, edge, line, cv2.LINE_AA)
+@cache
+def paint_stage(stage: int) -> np.ndarray:
+    if stage == 0:
+        return np.full((BASE_SIZE, BASE_SIZE, 3), 255, np.uint8)
+    shade = paint_stage(stage - 1).astype(np.float32) / 255
+    (paint_grazes, paint_bruise_and_cut, paint_black_eye_and_bleed)[stage - 1](shade)
+    return (np.clip(shade, 0, 1) * 255).astype(np.uint8)
 
 
-def stroke(overlay: np.ndarray, shape: np.ndarray, frame, color, line: int) -> None:
-    cv2.polylines(overlay, [to_image(shape, frame)], False, color, line, cv2.LINE_AA)
+def paint_grazes(shade: np.ndarray) -> None:
+    blot(shade, UV[OTHER_CHEEK] + (-0.04, 0.03), (0.14, 0.06), GRAZE, grain=0.5, seed=1, streaks=True)
+    jaw = UV[HURT_JAW] * 0.65 + UV[HURT_CHEEK] * 0.35
+    blot(shade, jaw, (0.12, 0.07), GRIME, grain=0.6, seed=3)
+    blot(shade, UV[HURT_CHEEK] + (0.01, 0.1), (0.07, 0.04), GRIME, grain=0.7, seed=4)
+
+
+def paint_bruise_and_cut(shade: np.ndarray) -> None:
+    under_eye = UV[HURT_LID] + (0.0, 0.04)
+    blot(shade, under_eye, (0.17, 0.11), BRUISE_RIM, grain=0.3, seed=5)
+    blot(shade, under_eye, (0.135, 0.08), BRUISE_MID, grain=0.35, seed=6)
+    blot(shade, under_eye - (0.0, 0.012), (0.1, 0.05), BRUISE_CORE, grain=0.35, seed=7)
+
+    # A straight cut along the cheekbone, in a patch of swollen skin.
+    start = UV[HURT_CHEEK] + (0.0, -0.01)
+    cut = [start, start + (0.025, 0.012), start + (0.05, 0.016), start + (0.07, 0.026)]
+    blot(shade, start + (0.035, 0.012), (0.09, 0.05), SWELLING, grain=0.2, seed=8)
+    line(shade, cut, 0.0032, BLOOD, seed=9, taper=True)
+    line(shade, cut, 0.0012, WOUND, seed=10, taper=True)
+
+
+def paint_black_eye_and_bleed(shade: np.ndarray) -> None:
+    centre = (UV[OTHER_OUTER_EYE] + UV[OTHER_INNER_EYE]) / 2
+    blot(shade, centre, (0.19, 0.14), BRUISE_RIM, grain=0.3, seed=15)
+    blot(shade, centre, (0.155, 0.105), SHINER_MID, grain=0.3, seed=16)
+    blot(shade, centre, (0.125, 0.075), SHINER_CORE, grain=0.3, seed=17)
+
+    # Nosebleed from one nostril, across the lips and down the chin.
+    nostril = UV[HURT_NOSTRIL] + (0.014, 0.012)
+    blot(shade, nostril + (0.0, 0.012), (0.024, 0.024), BLOOD, grain=0.3, seed=20)
+    line(shade, drip(nostril, 0.26, seed=19), 0.0075, BLOOD, seed=21, taper=True)
+
+    # Split lower lip.
+    split = UV[LIP_LOW] + (-0.035, 0.008)
+    tear = [split, split + (0.004, 0.012), split + (0.0, 0.026)]
+    line(shade, tear, 0.006, BLOOD, seed=24)
+    line(shade, tear, 0.0024, WOUND, seed=25)
+
+
+def blot(shade: np.ndarray, centre, radius, tone, grain: float, seed: int, streaks: bool = False) -> None:
+    """A soft patch with an uneven edge and mottled inside, like real discolouration."""
+    ys, xs = np.mgrid[0:BASE_SIZE, 0:BASE_SIZE].astype(np.float32) / BASE_SIZE
+    distance = np.hypot((xs - centre[0]) / radius[0], (ys - centre[1]) / radius[1])
+    mask = np.clip((1.0 - (distance + (fractal_noise(seed) - 0.5) * grain)) / 0.9, 0, 1)
+    mask = mask * mask * (3 - 2 * mask) * (1 - grain * 0.5 * fractal_noise(seed + 100))
+    if streaks:
+        mask = mask * scrape_lines(seed)
+    apply_tone(shade, mask, tone)
+
+
+def scrape_lines(seed: int) -> np.ndarray:
+    """Fine parallel scratches, stretched along the direction of the scrape."""
+    rows = np.random.default_rng(seed).random((96, 6), dtype=np.float32)
+    return np.clip(1.8 * cv2.resize(rows, (BASE_SIZE, BASE_SIZE), interpolation=cv2.INTER_CUBIC) - 0.3, 0, 1)
+
+
+def line(shade: np.ndarray, path, width: float, tone, seed: int, taper: bool = False) -> None:
+    """A stroke along a path through the texture, softened so it sits in the skin."""
+    path = np.round(np.asarray(path, np.float32) * BASE_SIZE).astype(int)
+    mask = np.zeros((BASE_SIZE, BASE_SIZE), np.float32)
+    weight = width * BASE_SIZE
+    for index, (start, end) in enumerate(zip(path[:-1], path[1:], strict=True)):
+        scale = 1 - 0.6 * index / max(1, len(path) - 2) if taper else 1.0
+        thickness = max(1, round(2 * weight * scale))
+        cv2.line(mask, tuple(start.tolist()), tuple(end.tolist()), scale, thickness, cv2.LINE_AA)
+    mask = cv2.GaussianBlur(mask, (0, 0), max(0.8, weight * 0.45))
+    apply_tone(shade, np.clip(mask * 1.3, 0, 1) * (0.75 + 0.25 * fractal_noise(seed)), tone)
+
+
+def drip(start, length: float, seed: int, steps: int = 8) -> list:
+    """Blood running down the face, drifting gently rather than zigzagging."""
+    noise = np.random.default_rng(seed).normal(0, 0.008, steps)
+    drift = np.convolve(noise, np.ones(3) / 3, mode="same")
+    return [np.asarray(start) + (drift[i] - drift[0], length * i / (steps - 1)) for i in range(steps)]
+
+
+def apply_tone(shade: np.ndarray, mask: np.ndarray, tone) -> None:
+    shade *= 1 - mask[:, :, None] * (1 - np.array(tone, np.float32))
+
+
+@cache
+def fractal_noise(seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    total = np.zeros((BASE_SIZE, BASE_SIZE), np.float32)
+    amplitude, weight = 1.0, 0.0
+    for cells in (6, 12, 24, 48, 96):
+        layer = rng.random((cells, cells), dtype=np.float32)
+        total += amplitude * cv2.resize(layer, (BASE_SIZE, BASE_SIZE), interpolation=cv2.INTER_CUBIC)
+        weight += amplitude
+        amplitude *= 0.55
+    total /= weight
+    return np.clip((total - total.min()) / np.ptp(total), 0, 1)
+
+
+@lru_cache(maxsize=1)
+def skin_mask() -> np.ndarray:
+    """255 on the skin, fading out towards the edge of the mesh so no outline shows."""
+    mask = np.zeros((BASE_SIZE, BASE_SIZE), np.uint8)
+    uv_pixels = np.round(UV * (BASE_SIZE - 1)).astype(np.int32)
+    for triangle in TRIANGLES:
+        cv2.fillConvexPoly(mask, uv_pixels[triangle], 255)
+    feather = int(SKIN_FEATHER * BASE_SIZE)
+    inner = cv2.erode(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * feather + 1, 2 * feather + 1)))
+    return cv2.GaussianBlur(inner, (0, 0), feather / 1.5)

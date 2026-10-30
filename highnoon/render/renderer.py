@@ -8,7 +8,7 @@ from highnoon.contracts import Perception, Player
 from highnoon.core.profiler import Profiler
 from highnoon.game.game import Game
 from highnoon.render import assets
-from highnoon.render.face_damage import draw_face_damage
+from highnoon.render.face_damage import draw_face_damage, preload_face_damage
 from highnoon.render.face_fx import FaceEffectRenderer
 from highnoon.render.fx import FX
 from highnoon.render.hud import Hud, draw_signal_debug
@@ -33,6 +33,7 @@ class Renderer:
         self.text = assets.TextCache()
         self.fx = FX(PLAYER_COLORS)
         self.face_fx = FaceEffectRenderer()
+        preload_face_damage()
         self.world = WorldView(PLAYER_COLORS, self.text, self.fx)
         self.hud = Hud(PLAYER_COLORS, self.text, self.fx)
         self.scenery = Scenery()
