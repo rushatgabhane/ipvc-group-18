@@ -8,6 +8,9 @@ import numpy as np
 class FaceEffectRenderer:
 
     def __init__(self, alpha: float = 0.9):
+
+        self.smoothed_angles = {}
+        self.smoothing = 0.85
         self.alpha = float(np.clip(alpha, 0.0, 1.0))
 
         hat_path = Path(__file__).resolve().parents[2] / "assets" / "sprites" / "cowboy_hat.png"
@@ -42,8 +45,9 @@ class FaceEffectRenderer:
                               borderValue = (0,0,0,0))
 
 
-    def draw(self, image: np.darray, face,
+    def draw(self, image: np.darray, face, player_id: int,
              color=None) -> np.darray:
+        
         points = np.asarray(face.landmarks, dtype = np.float32)
         x1, y1, x2, y2 = np.asarray(face.bbox).reshape(-1)[:4]
         face_width = float(x2-x1)
@@ -52,15 +56,27 @@ class FaceEffectRenderer:
         if face_width < 4 or face_height < 4:
             return image
 
-        angle = 0.0
+        previous_angle = self.smoothed_angles.get(player_id, 0.0)
+        angle = previous_angle
 
         if len(points) > 263:
             left_eye, right_eye = points[33], points[263] #mediapipe eyes iris center landmarks
 
-            angle = float(np.arctan2(
+            detected_angle = float(np.arctan2(
                 right_eye[1] - left_eye[1],
                 right_eye[0] - left_eye[0]
             ))
+
+            previous_angle = self.smoothed_angles.get(player_id, detected_angle)
+
+            delta = np.arctan2(
+                np.sin(detected_angle - previous_angle),
+                np.cos(detected_angle - previous_angle)
+            )
+
+            angle = (previous_angle + (1 - self.smoothing) * delta)
+
+            self.smoothed_angles[player_id] = angle
 
             eye_center = (left_eye + right_eye) / 2
             eye_distance = np.linalg.norm(right_eye - left_eye)
@@ -79,7 +95,7 @@ class FaceEffectRenderer:
 
         else:
             center_x = int((x1 + x2) / 2)
-            center_y = int(y1 - target_height * 0.35)
+            center_y = int(y1 - face_height * 0.35)
 
         original_h, original_w = self.hat.shape[:2]
 

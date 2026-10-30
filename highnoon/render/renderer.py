@@ -83,7 +83,7 @@ class Renderer:
                         face = FaceObservation(player.face_smoothed, face.bbox)
                     draw_face_damage(above_wall, face, player.id, hp_fraction, t - state.last_hit_t)
                 color = PLAYER_COLORS.get(player.id, WHITE)
-                self.face_fx.draw(above_wall, player.face, color)
+                self.face_fx.draw(above_wall, player.face, player.id, color)
 
         self.fx.update(t, game.effects)
         self.world.draw(image, game, t, dt)
