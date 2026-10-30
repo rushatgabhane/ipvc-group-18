@@ -10,7 +10,7 @@ class FaceEffectRenderer:
     def __init__(self, alpha: float = 0.9):
         self.alpha = float(np.clip(alpha, 0.0, 1.0))
 
-        hat_path = Path(__file__).parent / "assets" / "cowboy_hat.png"
+        hat_path = Path(__file__).resolve().parents[2] / "assets" / "sprites" / "cowboy_hat.png"
         self.hat = cv2.imread(str(hat_path), cv2.IMREAD_UNCHANGED)
 
         if self.hat is None:
@@ -19,6 +19,7 @@ class FaceEffectRenderer:
         if self.hat.ndim != 3 or self.hat.shape[2] != 4:
             raise ValueError("Cowboy hat PNG must have an alpha channel")
 
+    @staticmethod
     def rotate_hat(
                 hat: np.ndarray,
                 angle: float) -> np.ndarray: 
@@ -62,7 +63,7 @@ class FaceEffectRenderer:
 
         original_h, original_w = self.hat.shape[:2]
 
-        target_width = int(face_width * 1.3)
+        target_width = int(face_width * 1.)
         scale = target_width / original_w
 
         target_height = max(1, int(original_h * scale))
@@ -71,7 +72,9 @@ class FaceEffectRenderer:
                          (target_width, target_height),
                          interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR)
 
-        center_x = int(x1 + x2 / 2)
+        hat = self.rotate_hat(hat, -angle)
+
+        center_x = int((x1 + x2) / 2)
         center_y = int(y1 - target_height * 0.35)
 
         h, w = hat.shape[:2]
@@ -94,7 +97,7 @@ class FaceEffectRenderer:
         hat_y1 = hat_y0 + (y_end - y0)
 
         hat_crop = hat[hat_y0:hat_y1, hat_x0:hat_x1]
-
+        
         rgb = hat_crop[:, :, :3].astype(np.float32)
         alpha = hat_crop[:, :, 3:4].astype(np.float32) / 255
         alpha *= self.alpha
@@ -106,44 +109,3 @@ class FaceEffectRenderer:
         image[y0:y_end, x0:x_end] = np.clip(blended, 0, 255).astype(np.uint8)
 
         return image
-
-
-        center = ((x1 + x2) / 2, y1 + height * 0.02)
-
-        theta = np.linspace(0, 2*np.pi, 48, endpoint = False)
-        brim = np.column_stack((
-            hat_width * 0.5 * np.cos(theta),
-            hat_height * 0.2 + hat_height * 0.2 * np.sin(theta)
-        ))
-
-        brim = self._rotate(brim, center, angle)
-
-        cover = np.array([
-            [-0.3 * hat_width, 0.15 * hat_height],
-            [-0.2 * hat_width, -0.7 * hat_height],
-            [0.15 * hat_width, -0.7 * hat_height],
-            [0.3 * hat_width, 0.1 * hat_height]
-        ], dtype = np.float32)
-
-        cover = self._rotate(cover, center, angle)
-
-        overlay = image.copy()
-        cv2.fillPoly(overlay, 
-                    [np.round(brim).astype(np.int32)],
-                    color, cv2.LINE_AA)
-        cv2.fillPoly(overlay,
-                    [np.round(cover).astype(np.int32)],
-                    color, cv2.LINE_AA)
-
-        h, w = image.shape[:2]
-        cx, cy = map(int, center)
-        pad = int(hat_width * 0.65)
-        xa, xb = max(0, cx - pad), min(w, cx + pad)
-        ya, yb = max(0, cy - pad), min(h, cy + int(hat_height * 0.5))
-
-        if xa < xb and ya < yb:
-            image[ya:yb, xa:xb] = cv2.addWeighted(
-                overlay[ya:yb, xa:xb], self.alpha,
-                image[ya:yb, xa:xb], 1 - self.alpha, 0
-            )
-            return image
