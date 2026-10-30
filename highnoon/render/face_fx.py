@@ -54,8 +54,8 @@ class FaceEffectRenderer:
 
         angle = 0.0
 
-        if len(points) > 473:
-            left_eye, right_eye = points[468], points[473] #mediapipe eyes iris center landmarks
+        if len(points) > 263:
+            left_eye, right_eye = points[33], points[263] #mediapipe eyes iris center landmarks
 
             angle = float(np.arctan2(
                 right_eye[1] - left_eye[1],
@@ -66,7 +66,7 @@ class FaceEffectRenderer:
             eye_distance = np.linalg.norm(right_eye - left_eye)
 
             offset_x = 0
-            offset_y = -eye_distance * 1.8
+            offset_y = -eye_distance * 1.3
 
             cos_a = np.cos(angle)
             sin_a = np.sin(angle)
@@ -83,7 +83,7 @@ class FaceEffectRenderer:
 
         original_h, original_w = self.hat.shape[:2]
 
-        target_width = int(face_width * 1.75)
+        target_width = int(face_width * 1.5)
         scale = target_width / original_w
 
         target_height = max(1, int(original_h * scale))
