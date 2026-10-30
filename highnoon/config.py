@@ -66,7 +66,7 @@ class GameConfig:
     max_hp: int = 100
     body_damage: int = 10
     head_damage: int = 25
-    bullet_travel_s: float = 0.45
+    bullet_travel_s: float = 0.6
     hand_reach: float = 0.06
     gun_reach: float = 0.27
     rocket_reach: float = 0.38
