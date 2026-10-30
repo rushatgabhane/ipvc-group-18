@@ -18,6 +18,9 @@ HAND_GATE_PER_SHOULDER_WIDTH = 0.8
 NO_MATCH = 1e6
 UPDATE_MIN_GAP_PER_WIDTH = 0.12
 PENDING_GAP_S = 0.4
+# Past this, a missing player can only come back by face: a body near where they left could be anyone.
+TRACK_GAP_S = 1.5
+RECENT_FACE_SCORES = 3
 CANDIDATE_SAMPLES = 8
 FACE_TOP_K = 3
 
@@ -48,12 +51,13 @@ class Verdict:
 class IdentityTracker:
     """Slot-based identity: the people seen before `lock()` are enrolled and nobody else ever gets an id.
 
-    Before `lock()` (the enrolment window) slots behave as plain position trackers and collect face
-    samples. After it, a slot stays reserved for the rest of the game even when its player leaves the
-    frame, and a returning person gets it back only once their face matches its owner's, clearly better
-    than any other player's. Someone whose face cannot be seen waits without an id. A slot that is being
-    tracked by position is also checked against its owner's face, so a stranger who steps into the spot a
-    player just left, or two players whose ids swapped while crossing, are released and sorted out again.
+    Before `lock()` (the enrolment window) a slot is kept for `lost_timeout_s` after its player leaves,
+    while collecting face samples. After it, a slot stays reserved for the rest of the game. Either way a
+    body is followed by position only while it stays in view; a returning person gets their slot back once
+    their face matches its owner's, clearly better than any other player's. Someone whose face cannot be
+    seen waits without an id. A slot that is being tracked by position is also checked against its owner's
+    face, so a stranger who steps into the spot a player just left, or two players whose ids swapped while
+    crossing, are released and sorted out again.
     """
 
     def __init__(self, cfg: TrackingConfig, max_players: int = 2):
@@ -140,7 +144,7 @@ class IdentityTracker:
     ) -> dict[int, int]:
         if not centers:
             return {}
-        cost = self._distance_cost(centers, self.cfg.max_match_distance * width)
+        cost = self._distance_cost(centers, self.cfg.max_match_distance * width, t)
         rows, cols = linear_sum_assignment(cost)
         assignment = {r: c for r, c in zip(rows, cols, strict=True) if cost[r, c] < NO_MATCH}
         if self.locked:
@@ -197,9 +201,7 @@ class IdentityTracker:
         """
         candidates = self._track_candidates(newcomers, centers, embeddings, width, t)
         taken = set(assignment.values())
-        away = [
-            s for s in range(len(self.players)) if self._claimed[s] and not self._active[s] and s not in taken
-        ]
+        away = [s for s in range(len(self.players)) if self._claimed[s] and s not in taken]
         if not (newcomers and away):
             return set()
         verdicts = [[self._judge(candidates[d], slot, t) for slot in away] for d in newcomers]
@@ -243,7 +245,7 @@ class IdentityTracker:
         """How well a candidate's face fits an away slot. Until a face is seen they could be anyone."""
         if not candidate.embeddings or not self._has_face(slot):
             return Verdict(NO_MATCH, True, False)
-        seen = np.array(candidate.embeddings)
+        seen = np.array(candidate.embeddings)[-RECENT_FACE_SCORES:]
         score = float(self._face_similarity(slot, seen).mean())
         rivals = [s for s in range(len(self.players)) if s != slot and self._claimed[s] and self._has_face(s)]
         clearly_best = all(
@@ -257,23 +259,28 @@ class IdentityTracker:
         )
         return Verdict(1.0 - score, score >= self.cfg.face_reject, confirmed)
 
+    def _known_faces(self, slot: int) -> list[np.ndarray]:
+        known = [self._gallery[slot]] if self._gallery[slot] is not None else []
+        for faces in (self._recent_faces[slot], self._face_samples[slot]):
+            if faces:
+                known.append(np.array(faces))
+        return known
+
     def _has_face(self, slot: int) -> bool:
-        return self._gallery[slot] is not None or bool(self._recent_faces[slot])
+        return bool(self._known_faces(slot))
 
     def _face_similarity(self, slot: int, embeddings: np.ndarray) -> np.ndarray:
         """Per embedding: cosine similarity to the closest few of the owner's known faces."""
-        known = [self._gallery[slot]] if self._gallery[slot] is not None else []
-        if self._recent_faces[slot]:
-            known.append(np.array(self._recent_faces[slot]))
+        known = self._known_faces(slot)
         similarities = embeddings @ np.concatenate(known).T
         top = min(FACE_TOP_K, similarities.shape[1])
         return np.sort(similarities, axis=1)[:, -top:].mean(axis=1)
 
-    def _distance_cost(self, centers: list[np.ndarray], max_distance: float) -> np.ndarray:
+    def _distance_cost(self, centers: list[np.ndarray], max_distance: float, t: float) -> np.ndarray:
         cost = np.full((len(centers), len(self.players)), NO_MATCH)
-        for slot in range(len(self.players)):
+        for slot, player in enumerate(self.players):
             last = self._last_center[slot]
-            if self._active[slot] and last is not None:
+            if self._active[slot] and last is not None and t - player.last_seen <= TRACK_GAP_S:
                 distance = np.linalg.norm(np.asarray(centers) - last, axis=1)
                 cost[:, slot] = np.where(distance <= max_distance, distance, NO_MATCH)
         return cost
