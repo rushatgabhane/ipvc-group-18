@@ -31,11 +31,11 @@ class Renderer:
         self.cfg = cfg
         self.text = assets.TextCache()
         self.fx = FX(PLAYER_COLORS)
-        self.face_fx = FaceEffectRenderer()
         preload_face_damage()
         self.world = WorldView(PLAYER_COLORS, self.text, self.fx)
         self.hud = Hud(PLAYER_COLORS, self.text, self.fx)
         self.scenery = Scenery()
+        self.face_fx = FaceEffectRenderer()
         self.shake = (0, 0)
         self._t_last: float | None = None
 
