@@ -366,97 +366,38 @@ def bullet_sprite(length: int, color: tuple[int, int, int]) -> Sprite:
     return Sprite.from_bgra(outlined(sprite.bgra, color))
 
 
-@dataclass(frozen=True)
-class Daylight:
-    sky_top: tuple[float, float, float]
-    sky_low: tuple[float, float, float]
-    sun_x: float
-    sun_y: float
-    sun: tuple[float, float, float]
-    glow: tuple[float, float, float]
-    land: tuple[float, float, float]
+SKY_TOP, SKY_LOW = (175, 120, 55), (150, 205, 245)
+SUN_X, SUN_Y = 0.8, 0.2
+SUN_COLOR, SUN_GLOW = (170, 240, 255), (60, 110, 120)
 
 
-DAYLIGHT_KEYS = (
-    (
-        0.0,
-        Daylight((175, 120, 55), (150, 205, 245), 0.8, 0.2, (170, 240, 255), (60, 110, 120), (1.0, 1.0, 1.0)),
-    ),
-    (
-        0.4,
-        Daylight(
-            (165, 110, 70), (115, 190, 250), 0.82, 0.33, (120, 220, 255), (40, 120, 200), (0.85, 0.95, 1.05)
-        ),
-    ),
-    (
-        0.75,
-        Daylight((120, 65, 85), (80, 140, 250), 0.84, 0.47, (70, 150, 255), (30, 90, 230), (0.6, 0.68, 0.9)),
-    ),
-    (
-        1.0,
-        Daylight((70, 35, 45), (95, 85, 170), 0.86, 0.56, (60, 110, 230), (40, 60, 160), (0.42, 0.42, 0.55)),
-    ),
-)
-
-
-def daylight(dusk: float) -> Daylight:
-    stops = [stop for stop, _ in DAYLIGHT_KEYS]
-    fields = Daylight.__dataclass_fields__
-    mixed = {}
-    for name in fields:
-        values = np.array([getattr(key, name) for _, key in DAYLIGHT_KEYS], np.float32)
-        if values.ndim == 1:
-            mixed[name] = float(np.interp(dusk, stops, values))
-        else:
-            mixed[name] = tuple(float(np.interp(dusk, stops, values[:, i])) for i in range(values.shape[1]))
-    return Daylight(**mixed)
-
-
-def tinted(color, tint) -> tuple[int, int, int]:
-    return tuple(int(min(255, c * k)) for c, k in zip(color, tint, strict=True))
-
-
-def desert_background(width: int, height: int, seed: int = 7, dusk: float = 0.0) -> np.ndarray:
+def desert_background(width: int, height: int, seed: int = 7) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    light = daylight(dusk)
-    image = sky_with_sun(width, height, light)
+    image = sky_with_sun(width, height)
     horizon = int(height * HORIZON)
     draw_mesa_ridge(
-        image,
-        rng,
-        horizon,
-        horizon - height * 0.05,
-        height * 0.16,
-        tinted((120, 150, 200), light.land),
-        height * 0.04,
+        image, rng, horizon, horizon - height * 0.05, height * 0.16, (120, 150, 200), height * 0.04
     )
     draw_mesa_ridge(
-        image,
-        rng,
-        horizon,
-        horizon - height * 0.01,
-        height * 0.10,
-        tinted((70, 105, 165), light.land),
-        height * 0.03,
+        image, rng, horizon, horizon - height * 0.01, height * 0.10, (70, 105, 165), height * 0.03
     )
-    ground = sand(rng, width, height - horizon).astype(np.float32) * np.array(light.land, np.float32)
-    image[horizon:] = np.clip(ground, 0, 255).astype(np.uint8)
+    image[horizon:] = sand(rng, width, height - horizon)
     for x in (int(width * 0.12), int(width * 0.33), int(width * 0.9)):
         cactus_h = int(height * rng.uniform(0.06, 0.1))
-        draw_cactus(image, rng, x, horizon + int(height * 0.01), cactus_h, tinted((45, 85, 60), light.land))
+        draw_cactus(image, rng, x, horizon + int(height * 0.01), cactus_h)
     return image
 
 
-def sky_with_sun(width: int, height: int, light: Daylight) -> np.ndarray:
+def sky_with_sun(width: int, height: int) -> np.ndarray:
     t = np.linspace(0, 1, height, dtype=np.float32)[:, None, None]
-    top, low = np.array(light.sky_top, np.float32), np.array(light.sky_low, np.float32)
+    top, low = np.array(SKY_TOP, np.float32), np.array(SKY_LOW, np.float32)
     sky = (top + (low - top) * np.clip(t / 0.62, 0, 1) ** 1.3) * np.ones((1, width, 1), np.float32)
-    sun_x, sun_y, sun_r = int(width * light.sun_x), int(height * light.sun_y), int(height * 0.075)
+    sun_x, sun_y, sun_r = int(width * SUN_X), int(height * SUN_Y), int(height * 0.075)
     yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
     glow = np.clip(1 - np.sqrt((xx - sun_x) ** 2 + (yy - sun_y) ** 2) / (sun_r * 5), 0, 1) ** 2.2
-    sky += glow[:, :, None] * np.array(light.glow, np.float32)
+    sky += glow[:, :, None] * np.array(SUN_GLOW, np.float32)
     image = np.clip(sky, 0, 255).astype(np.uint8)
-    cv2.circle(image, (sun_x, sun_y), sun_r, tuple(int(c) for c in light.sun), -1, cv2.LINE_AA)
+    cv2.circle(image, (sun_x, sun_y), sun_r, SUN_COLOR, -1, cv2.LINE_AA)
     return image
 
 

@@ -3,7 +3,7 @@ import numpy as np
 from highnoon.config import GameConfig
 from highnoon.game.entities import Effect
 from highnoon.game.game import Game
-from highnoon.render.scenery import DUSK_AFTER_S, Scenery, dusk_target
+from highnoon.render.scenery import Scenery
 
 
 def live_game():
@@ -13,14 +13,18 @@ def live_game():
     return game
 
 
-def test_dusk_follows_round_time_and_the_most_hurt_player():
+def test_it_stays_day_however_long_and_hard_the_round_goes():
     game = live_game()
-    assert dusk_target(game, 0.0) == 0.0
-    assert dusk_target(game, DUSK_AFTER_S / 2) == 0.5
-    game.states[1] = type("State", (), {"hp": 20})()
-    assert dusk_target(game, 1.0) == 0.8
-    game.mode = "idle"
-    assert dusk_target(game, 1.0) == 0.0
+    scenery = Scenery()
+    scenery.build(320, 180, game.cfg.cover_height)
+    scenery.update(game)
+    day_sky, day_wall = scenery.background.copy(), scenery.wall.copy()
+    game.states[1] = type("State", (), {"hp": 5})()
+    for minutes in range(1, 6):
+        game._t = minutes * 60.0
+        scenery.update(game)
+    assert np.array_equal(scenery.background, day_sky)
+    assert np.array_equal(scenery.wall, day_wall)
 
 
 def test_wall_damage_lasts_for_the_round_only():

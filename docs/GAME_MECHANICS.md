@@ -1,8 +1,8 @@
 # HIGH NOON: Game mechanics
 
-This describes the game as of commit `40a8657` ("palm aiming fixes"), including practice mode, the
-scenery damage and dusk, the vultures, the hat, the realistic facial damage and palm aiming, plus
-the grenade rebalance (section 5.4) made on top of it.
+This describes the game as of commit `1cbbea0` ("grenade + face_layering"), including practice mode,
+the scenery damage, the hat, the realistic facial damage, palm aiming and the grenade rebalance
+(section 5.4), plus the removal of the day-to-dusk progression made on top of it.
 Every number comes from `GameConfig` in `highnoon/config.py` or from a constant in the module named
 next to it. Distances given as a fraction of the screen use the frame height `H` or width `W` in the
 mirrored camera frame.
@@ -240,7 +240,7 @@ The game starts at `max_hp = 100`. When a player fires, the weapon is chosen in 
   - floating damage numbers
   - BLOCKED and SAFE!
   - explosions with particles and screen shake
-  - the scenery, vultures, facial damage and hat described in sections 6b and 6c
+  - the scenery, facial damage and hat described in sections 6b and 6c
 - **Sound** (`render/sound.py`, `--mute` turns it off): recorded effects for the revolver, rocket
   launch, grenade throw, explosion, reload, dry-fire click and the 3-2-1 click, plus announcer
   voices for "FIGHT!" and "K.O.". Credits are in `assets/CREDITS.md`.
@@ -263,9 +263,10 @@ shots, powerups, reloads, dry fires, ducks, time ducked, time aiming, the share 
 tracked hand, fists (with how many fell in cooldown and the share that fired) and the counts of
 ignored fists by reason. Practice mode does not write this log.
 
-## 6b. Scenery and ambient effects (`render/scenery.py`, `render/wildlife.py`)
+## 6b. Scenery (`render/scenery.py`)
 
-These only change the picture; none of them affect the rules.
+The background is always a daytime desert. These effects only change the picture; none of them
+affect the rules.
 
 - **Wall damage:** a bullet that is BLOCKED by the wall leaves a bullet hole with splinters where it
   hit. An explosion scorches the wall, and one near the top edge also burns a charred notch into
@@ -273,13 +274,6 @@ These only change the picture; none of them affect the rules.
   round starts.
 - **Ground damage:** an explosion scorches the desert behind the players and leaves a crater in the
   sand. This only shows with the background replacement on (`b`). It is also cleared each round.
-- **Dusk:** during a duel the sky moves from midday towards sunset, and the wall darkens with it.
-  The target is the larger of (time since the round started ÷ 90 s) and (the HP lost by the most
-  hurt player ÷ max HP). The sky eases towards it at 0.4 per second and goes back to day outside
-  the duel.
-- **Vultures:** when a visible player is at or below `35%` of max HP during a duel, three vultures
-  fade in near the top of the screen and circle above the weakest such player, following them
-  sideways. They fade out over 1 s once nobody is that low.
 
 ## 6c. Face effects (`render/face_damage.py`, `render/face_fx.py`)
 
@@ -344,8 +338,7 @@ facial damage.
 
 The facial degradation and the hat are the only effects drawn from face landmarks. The other
 effects around a player's head or body (the name tag and HP bar, the red flash of the HUD card,
-`-N` damage numbers, HEADSHOT!, the camping drain and the vultures) come from the face box or the
-pose. Like the facial degradation, most of them need the player to take damage (see section 9 for
+`-N` damage numbers, HEADSHOT! and the camping drain) come from the face box or the pose. Like the facial degradation, most of them need the player to take damage (see section 9 for
 why that only happens through bombs in practice mode).
 
 ## 7. Tunables at a glance (`GameConfig`)
@@ -419,9 +412,7 @@ the duel; only the targets change.
 from every hit test (`self.cfg.practice` checks in `_hit_fractions` and `_explode` in `game.py`),
 and `_opponent_of()` returns `None`. So no bullet, rocket, grenade or camping drain can hurt them.
 The player effects that react to damage only appear after the player shoots bombs. These are the
-red face and HUD-card flash, the `-N` numbers on the body, the facial degradation, the dusk caused
-by lost HP and the vultures at 35 HP or less. Each bomb (25 HP) moves the face exactly one
-degradation stage, and the third bomb also brings the vultures. HEADSHOT! never appears in
-practice. The hat does not depend on damage, so it is always drawn. The scenery
+red face and HUD-card flash, the `-N` numbers on the body and the facial degradation. Each bomb
+(25 HP) moves the face exactly one degradation stage. HEADSHOT! never appears in practice. The hat does not depend on damage, so it is always drawn. The scenery
 effects (bullet holes, scorch marks, glass on the rail) do appear in practice whenever the player
 hits the wall, fires a rocket or breaks a bottle.
