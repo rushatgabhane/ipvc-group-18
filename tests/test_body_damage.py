@@ -101,3 +101,20 @@ def test_low_hp_does_not_tint_the_player():
     image = blank()
     draw_body_damage(image, make_player(), 0.2, math.inf, person_mask())
     assert tuple(image[70, 115]) == (128, 128, 128)  # on the person, clear of the marks
+
+
+def test_torso_is_marked_when_the_hips_are_out_of_view():
+    player = make_player()
+    player.pose.visibility[[23, 24]] = 0.0
+    image = blank()
+    draw_body_damage(image, player, 0.2, math.inf)
+    rows, cols = np.nonzero(changed(image))
+    assert rows.size and rows.min() >= 70 and cols.min() >= 130 and cols.max() <= 270
+
+
+def test_no_shoulders_no_marks():
+    player = make_player()
+    player.pose.visibility[[11, 12]] = 0.0
+    image = blank()
+    draw_body_damage(image, player, 0.2, math.inf)
+    assert np.all(image == 128)

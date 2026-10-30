@@ -15,6 +15,8 @@ from highnoon.render.face_damage import HIT_FLASH_S, damage_stage
 SHOULDERS, HIPS = (11, 12), (23, 24)
 MIN_VISIBILITY = 0.5
 MIN_TORSO_PX = 40
+# Shoulders to hips is about 1.5 shoulder widths, i.e. 3 half-widths; used when the hips are out of view.
+TORSO_LENGTH_PER_HALF_SHOULDER = 3.0
 ROI_PAD = 0.3
 # Same soft threshold the camera layer uses to cut the person out of the background.
 MASK_LOW, MASK_HIGH = 0.45, 0.9
@@ -113,8 +115,9 @@ def draw_body_damage(
         return
     keypoints = player.smoothed if player.smoothed is not None else player.pose.keypoints
     visible = player.pose.visibility > MIN_VISIBILITY
-    torso_points = keypoints[list(SHOULDERS + HIPS)]
-    roi = region(image, torso_points, floor_y)
+    torso = torso_frame(keypoints, visible)
+    points = torso_corners(*torso) if torso is not None else keypoints[list(SHOULDERS + HIPS)]
+    roi = region(image, points, floor_y)
     if roi is None:
         return
     (x0, y0, x1, y1), view = roi
@@ -122,7 +125,6 @@ def draw_body_damage(
         person = person_alpha(mask[y0:y1, x0:x1], columns, x0)
         flash_silhouette(view, person, flash)
 
-    torso = torso_frame(keypoints, visible)
     if stage == 0 or torso is None:
         return
     origin, u, v = torso
@@ -133,15 +135,28 @@ def draw_body_damage(
 
 
 def torso_frame(keypoints: np.ndarray, visible: np.ndarray):
-    if not visible[list(SHOULDERS + HIPS)].all():
+    """Origin between the shoulders, u = half the shoulder line, v = down to the hips.
+
+    In the game the wall or the bottom of the picture usually hides the hips, so only the shoulders are
+    required; without the hips the torso is assumed to hang straight down from the shoulder line.
+    """
+    if not visible[list(SHOULDERS)].all():
         return None
     left, right = keypoints[list(SHOULDERS)]
     shoulders = (left + right) / 2
-    hips = keypoints[list(HIPS)].mean(axis=0)
-    u, v = (right - left) / 2, hips - shoulders
+    u = (right - left) / 2
     if float(np.linalg.norm(u)) * 2 < MIN_TORSO_PX:
         return None
+    if visible[list(HIPS)].all():
+        v = keypoints[list(HIPS)].mean(axis=0) - shoulders
+    else:
+        down = np.array([-u[1], u[0]], np.float32)
+        v = (down if down[1] >= 0 else -down) * TORSO_LENGTH_PER_HALF_SHOULDER
     return shoulders, u, v
+
+
+def torso_corners(origin: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
+    return np.array([origin - u, origin + u, origin + v - u, origin + v + u], np.float32)
 
 
 def region(image: np.ndarray, points: np.ndarray, floor_y: int | None):
