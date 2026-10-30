@@ -407,7 +407,7 @@ def debug_lines(game: Game, player: Player) -> list[str]:
         f" (fist < {cfg.fist_closed:.2f}, open > {cfg.fist_open:.2f})"
     )
     return [
-        f"arm {signals.extension:4.2f}  elev {np.degrees(signals.elevation):+4.0f} (aim -50..80)",
+        f"palm {signals.extension:4.2f}  elev {np.degrees(signals.elevation):+4.0f} (aim -50..80)",
         f"aim {'ON' if frame.aiming else 'off'}  head {frame.head_pos:.2f} (duck > {wall_top:.2f})",
         f"ammo {game.states[player.id].ammo}",
         hand,

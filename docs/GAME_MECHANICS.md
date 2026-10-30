@@ -11,7 +11,7 @@ mirrored camera frame.
 
 HIGH NOON is a two-player duel played in front of one webcam. Each player:
 
-- aims by pointing an arm,
+- aims by pointing a palm,
 - fires by closing the aiming hand into a fist,
 - ducks behind a wall that covers the bottom 25% of the screen to dodge shots and to reload.
 
@@ -58,13 +58,16 @@ idle ──(2 players visible)──► countdown (3 s) ──► duel ──(so
 
 ### 4.1 Aiming (`highnoon/vision/motion.py`)
 
-- **Pointer:** if the wrist is at least `0.8` torso lengths from the shoulder (a straight arm), the
-  aim runs shoulder → wrist. Otherwise it runs elbow → wrist (the forearm), for players sitting
-  close to the camera.
-- **Requirements:** the forearm must be at least `0.3` torso lengths long, and the aim must point
-  between **−50° and +80°** of elevation. Outside that range the player is not aiming.
-- **Choice of arm:** the right arm is the default. The game switches to the left arm only while the
-  right arm cannot be used for aiming.
+- **Pointer:** the aim runs from the wrist to the middle of the four knuckles, measured from the hand
+  landmarks. The elbow and shoulder play no part, so turning the hand is enough. The knuckles stay in
+  place as the fingers close, so making a fist does not move the aim.
+- **Requirements:** the hand must be tracked, the palm must look at least `0.08` torso lengths long
+  on screen (a shorter one is pointing at the camera), and the aim must point between **−50° and
+  +80°** of elevation. Outside that range the player is not aiming.
+- **Tracking dropouts:** if the hand is lost or points at the camera, the last aim is held for
+  `0.3` s. After that the player is not aiming until the hand is back.
+- **Choice of hand:** the right hand is the default. The game switches to the left hand only while
+  the right hand cannot be used for aiming.
 - **Smoothing:** the aim angle goes through a One Euro filter (`min_cutoff 0.8`, `beta 0.6`). The
   shot starts at the wrist.
 - **Held weapon:** while aiming, the weapon the player would fire (revolver, rocket launcher or
