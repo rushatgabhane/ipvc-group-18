@@ -11,8 +11,9 @@ from highnoon.render import assets
 # The sky is pre-rendered at a few keyframes between midday and sunset and cross-faded between them.
 SUNSET_KEYFRAMES = 5
 SUNSET_LEVELS = 120
+# HP is lost in chunks, so the sky eases towards where it should be instead of jumping.
+SUNSET_EASE_PER_S = 0.15
 SUNSET_AFTER_S = 60.0
-BACK_TO_DAY_PER_S = 0.5
 WALL_SUNSET_SHARE = 0.6
 CHARRED = (22, 24, 28)
 EMBER = (30, 90, 210)
@@ -87,7 +88,8 @@ class Scenery:
         wall_changed |= stamped_wall
         ground_changed |= stamped_ground
         target = sunset_target(game, t)
-        self.sunset = target if target >= self.sunset else max(target, self.sunset - BACK_TO_DAY_PER_S * dt)
+        step = SUNSET_EASE_PER_S * dt
+        self.sunset += float(np.clip(target - self.sunset, -step, step))
         level = round(self.sunset * SUNSET_LEVELS)
         if level != self._level:
             self._level = level
@@ -198,11 +200,13 @@ class Scenery:
 
 
 def sunset_target(game: Game, t: float) -> float:
-    """How far towards sunset the sky should be: it gets there `SUNSET_AFTER_S` into a round and stays."""
+    """How far towards sunset the sky should be: the round time out of `SUNSET_AFTER_S` or the share of
+    HP the lowest player has lost, whichever is further along."""
     if game.mode != "duel":
         return 0.0
     elapsed = (game.round_over_t if game.round_over_t is not None else t) - game.round_start_t
-    return float(np.clip(elapsed / SUNSET_AFTER_S, 0.0, 1.0))
+    lowest = min((state.hp for state in game.states.values()), default=game.cfg.max_hp)
+    return float(np.clip(max(elapsed / SUNSET_AFTER_S, 1 - lowest / game.cfg.max_hp), 0.0, 1.0))
 
 
 def scorch(
