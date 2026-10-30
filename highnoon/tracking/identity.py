@@ -163,7 +163,12 @@ class IdentityTracker:
     def _verify_owners(
         self, assignment: dict[int, int], embeddings: list[np.ndarray | None], t: float
     ) -> None:
-        """Release a slot whose tracked body keeps showing a face that is not its owner's."""
+        """Release a slot whose tracked body keeps showing a face that is not confirmed as its owner's.
+
+        Someone stepping in front of a player takes over their spot, so following by position alone would
+        hand them the id. Any face short of a confirmed match counts against the slot: a stranger often
+        scores somewhere in between, never clearly low.
+        """
         for detection, slot in list(assignment.items()):
             embedding = embeddings[detection]
             if embedding is None or not self._has_face(slot):
@@ -171,8 +176,6 @@ class IdentityTracker:
             similarity = self._face_similarity(slot, embedding[None])[0]
             if similarity >= self.cfg.face_accept:
                 self._doubts.pop(slot, None)
-                continue
-            if similarity >= self.cfg.face_reject:
                 continue
             doubt = self._doubts.get(slot)
             if doubt is None or t - doubt.last_t > PENDING_GAP_S:

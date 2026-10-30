@@ -207,3 +207,19 @@ def test_stranger_stepping_into_a_players_spot_during_enrolment_is_released():
         1: 300,
         2: 600,
     }
+
+
+def test_stranger_who_steps_in_front_of_a_player_does_not_take_their_id():
+    # A realistic stranger: not clearly unlike the player (similarity ~0.3), just never a confirmed match.
+    lookalike = 0.32 * BOB + 0.95 * STRANGER
+    lookalike /= np.linalg.norm(lookalike)
+    tr = IdentityTracker(TrackingConfig())
+    for i in range(10):
+        tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
+    tr.lock()
+    play(tr, [(300, ALICE), (900, BOB)], 0.5, seconds=0.5)
+    assert ids_by_x(play(tr, [(300, ALICE), (910, lookalike)], 1.05)) == {1: 300}
+    assert ids_by_x(play(tr, [(300, ALICE), (910, lookalike), (1100, BOB)], 1.7, seconds=0.3)) == {
+        1: 300,
+        2: 1100,
+    }

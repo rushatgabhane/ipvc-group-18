@@ -60,8 +60,8 @@ idle ──(2 players visible)──► countdown (3 s) ──► duel ──(so
   their latest 2–3 embeddings, seen for `0.15` s) and beats every other player's by `0.1`. Until then the body gets no
   id, so a third person never gets one, even when a player is away. Identity is decided by face only:
   someone whose face cannot be seen waits without an id until it can.
-- **Face check** (before and during the duel): a body tracked by position whose face keeps scoring below `0.2` against the slot's
-  owner for `0.3` s is released. This catches a stranger stepping into the spot a player just left,
+- **Face check** (before and during the duel): a body tracked by position whose face keeps failing to match the slot's owner
+  (below `0.36`) for `0.3` s is released. This catches a stranger stepping into the spot a player just left,
   and ids swapped by two players crossing (both are released, then re-identified by face).
 - One more body than there are players is detected, so a bystander is seen and refused rather than
   hiding a player from the pose detector.
