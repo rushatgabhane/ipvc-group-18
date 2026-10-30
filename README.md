@@ -55,7 +55,7 @@ uv pip install -r requirements-dev.txt
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 
-# download model weights (~27 MB, verified by sha256)
+# download model weights (~54 MB, verified by sha256)
 .venv/bin/python tools/download_models.py
 ```
 

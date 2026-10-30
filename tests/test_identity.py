@@ -18,13 +18,8 @@ def face_at(x: float, y: float) -> FaceObservation:
     return FaceObservation(np.zeros((478, 2), np.float32), bbox)
 
 
-def perception(t: float, poses, faces=(), shirts=None) -> Perception:
-    """Poses are drawn onto the frame in the given BGR shirt colours (default: all the same grey)."""
+def perception(t: float, poses, faces=()) -> Perception:
     image = np.full((H, W, 3), 40, np.uint8)
-    for pose, color in zip(poses, shirts or [(120, 120, 120)] * len(poses), strict=False):
-        x0, y0 = pose.keypoints[11].astype(int)
-        x1, y1 = pose.keypoints[24].astype(int)
-        image[max(0, y0) : y1, max(0, x0) : x1] = color
     frame = Frame(int(t * 30) + 1, image, t, int(t * 1000))
     return Perception(frame, list(poses), list(faces), None, t)
 
@@ -55,9 +50,6 @@ def test_identity_kept_through_short_loss():
     assert tr.reassigned == set()
 
 
-RED, BLUE, GREEN = (0, 0, 220), (220, 0, 0), (0, 200, 0)
-
-
 def wide_pose(x: float) -> PoseObservation:
     pose = pose_at(x)
     pose.keypoints[11], pose.keypoints[12] = (x - 60, 300), (x + 60, 300)
@@ -65,69 +57,12 @@ def wide_pose(x: float) -> PoseObservation:
     return pose
 
 
-def enrolled_p2_then_left(tr):
-    for i in range(10):
-        tr.update(perception(i * 0.05, [wide_pose(300), wide_pose(900)], shirts=[RED, BLUE]))
-    tr.lock()
-    tr.update(perception(1.0, [wide_pose(300)], shirts=[RED]))
-    tr.update(perception(5.0, [wide_pose(300)], shirts=[RED]))
-
-
-def arrivals(tr, shirt, t0=6.0, x=100, seconds=0.6):
-    players = []
-    for i in range(int(seconds / 0.05) + 1):
-        players = tr.update(perception(t0 + i * 0.05, [wide_pose(300), wide_pose(x)], shirts=[RED, shirt]))
-    return players
-
-
-def test_player_returning_from_the_other_side_keeps_their_id():
-    tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
-    enrolled_p2_then_left(tr)
-    assert ids_by_x(arrivals(tr, BLUE, seconds=0.1)) == {1: 300}
-    assert ids_by_x(arrivals(tr, BLUE)) == {1: 300, 2: 100}
-    assert tr.reassigned == set()
-
-
-def test_player_with_hips_out_of_view_is_still_recognised_by_the_upper_body():
-    tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
-    enrolled_p2_then_left(tr)
-    players = []
-    for i in range(8):
-        arrival = wide_pose(100)
-        arrival.visibility[[23, 24]] = 0.0
-        players = tr.update(perception(6.0 + i * 0.05, [wide_pose(300), arrival], shirts=[RED, BLUE]))
-    assert ids_by_x(players) == {1: 300, 2: 100}
-
-
-def test_short_dropout_does_not_restart_the_confirmation():
-    tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
-    enrolled_p2_then_left(tr)
-    tr.update(perception(6.0, [wide_pose(300), wide_pose(100)], shirts=[RED, BLUE]))
-    tr.update(perception(6.1, [wide_pose(300)], shirts=[RED]))
-    players = tr.update(perception(6.25, [wide_pose(300), wide_pose(100)], shirts=[RED, BLUE]))
-    assert ids_by_x(players) == {1: 300, 2: 100}
-
-
-def test_third_person_gets_no_id_while_a_player_is_away():
-    tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
-    enrolled_p2_then_left(tr)
-    assert ids_by_x(arrivals(tr, GREEN)) == {1: 300}
-    assert tr.reassigned == set()
-    assert ids_by_x(arrivals(tr, BLUE, t0=8.0)) == {1: 300, 2: 100}
-
-
-def test_lookalike_of_the_present_player_is_not_given_the_missing_slot():
-    tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
-    enrolled_p2_then_left(tr)
-    assert ids_by_x(arrivals(tr, RED)) == {1: 300}
-
-
 def test_leaving_before_the_lock_frees_the_slot():
     tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
-    tr.update(perception(0.0, [wide_pose(300), wide_pose(900)], shirts=[RED, BLUE]))
-    tr.update(perception(0.5, [wide_pose(300)], shirts=[RED]))
-    tr.update(perception(2.0, [wide_pose(300)], shirts=[RED]))
-    players = tr.update(perception(2.1, [wide_pose(300), wide_pose(700)], shirts=[RED, GREEN]))
+    tr.update(perception(0.0, [wide_pose(300), wide_pose(900)]))
+    tr.update(perception(0.5, [wide_pose(300)]))
+    tr.update(perception(2.0, [wide_pose(300)]))
+    players = tr.update(perception(2.1, [wide_pose(300), wide_pose(700)]))
     assert ids_by_x(players) == {1: 300, 2: 700}
     assert 2 in tr.reassigned
 
@@ -152,3 +87,93 @@ def test_far_face_not_assigned():
     tr = IdentityTracker(TrackingConfig())
     players = tr.update(perception(0.0, [pose_at(300)], [face_at(1100, 600)]))
     assert players[0].face is None
+
+
+rng = np.random.default_rng(7)
+ALICE, BOB, STRANGER = (v / np.linalg.norm(v) for v in rng.normal(size=(3, 128)))
+
+
+def seen_face(identity: np.ndarray, x: float) -> FaceObservation:
+    """A face over a wide_pose's nose whose embedding is `identity` plus a little per-frame noise."""
+    face = face_at(x, 210)
+    noisy = identity + rng.normal(scale=0.03, size=identity.shape)
+    face.embedding = noisy / np.linalg.norm(noisy)
+    return face
+
+
+def scene(t: float, people) -> Perception:
+    """`people` is a list of (x, face identity or None for a face that cannot be seen)."""
+    poses = [wide_pose(x) for x, _ in people]
+    faces = [seen_face(identity, x) for x, identity in people if identity is not None]
+    return perception(t, poses, faces)
+
+
+def enrolled_faces_p2_then_left():
+    tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
+    for i in range(10):
+        tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
+    tr.lock()
+    tr.update(scene(1.0, [(300, ALICE)]))
+    tr.update(scene(5.0, [(300, ALICE)]))
+    return tr
+
+
+def play(tr, people, t0, seconds=0.6):
+    players = []
+    for i in range(int(seconds / 0.05) + 1):
+        players = tr.update(scene(t0 + i * 0.05, people))
+    return players
+
+
+def test_stranger_gets_no_id_while_a_player_is_away():
+    tr = enrolled_faces_p2_then_left()
+    assert ids_by_x(play(tr, [(300, ALICE), (100, STRANGER)], 6.0, seconds=2.0)) == {1: 300}
+    assert tr.reassigned == set()
+
+
+def test_returning_player_gets_their_id_back_once_confirmed():
+    tr = enrolled_faces_p2_then_left()
+    assert ids_by_x(play(tr, [(300, ALICE), (100, BOB)], 6.0, seconds=0.05)) == {1: 300}
+    assert ids_by_x(play(tr, [(300, ALICE), (100, BOB)], 6.1)) == {1: 300, 2: 100}
+    assert tr.reassigned == set()
+
+
+def test_returning_player_waits_without_an_id_until_their_face_is_seen():
+    tr = enrolled_faces_p2_then_left()
+    assert ids_by_x(play(tr, [(300, ALICE), (100, None)], 6.0, seconds=3.0)) == {1: 300}
+    assert ids_by_x(play(tr, [(300, ALICE), (100, BOB)], 9.05)) == {1: 300, 2: 100}
+
+
+def test_lookalike_of_the_present_player_is_not_given_the_missing_slot():
+    tr = enrolled_faces_p2_then_left()
+    assert ids_by_x(play(tr, [(300, ALICE), (100, ALICE)], 6.0, seconds=2.0)) == {1: 300}
+
+
+def test_third_person_present_when_the_player_returns_does_not_take_the_id():
+    tr = enrolled_faces_p2_then_left()
+    play(tr, [(300, ALICE), (1000, STRANGER)], 6.0, seconds=1.0)
+    players = play(tr, [(300, ALICE), (1000, STRANGER), (650, BOB)], 7.1)
+    assert ids_by_x(players) == {1: 300, 2: 650}
+
+
+def test_stranger_stepping_into_a_players_spot_is_released():
+    tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
+    for i in range(10):
+        tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
+    tr.lock()
+    tr.update(scene(1.0, [(300, ALICE)]))
+    players = play(tr, [(300, ALICE), (920, STRANGER)], 1.2)
+    assert ids_by_x(players) == {1: 300}
+    assert ids_by_x(play(tr, [(300, ALICE), (920, STRANGER), (600, BOB)], 2.0)) == {
+        1: 300,
+        2: 600,
+    }
+
+
+def test_ids_swapped_by_position_are_corrected_by_face():
+    tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
+    for i in range(10):
+        tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
+    tr.lock()
+    players = play(tr, [(300, BOB), (900, ALICE)], 1.0, seconds=1.0)
+    assert ids_by_x(players) == {1: 900, 2: 300}
