@@ -102,7 +102,7 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
   them to come back; after 5 s more they forfeit.
 - **Duel.** A body hit costs 10 HP and a headshot 25 (4 headshots or 10 body hits to win). First to 0 loses the round.
   Bullets take 0.45 s to arrive, so you can duck when you see your opponent fire.
-- **Powerups (duel only).** Every 15 s a powerup drops from the top of the screen down the
+- **Powerups (duel only).** Every 10 s a powerup drops from the top of the screen down the
   middle and disappears behind the wall. Whoever shoots it first gets it (lead your shot: it moves):
 
   | Powerup | Effect |

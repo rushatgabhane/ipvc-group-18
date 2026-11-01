@@ -259,8 +259,8 @@ The game starts at `max_hp = 100`. When a player fires, the weapon is chosen in 
 
 ### 5.5 Powerups
 
-- **When they drop:** only during a live duel. The first one comes 15 s after the duel starts
-  (`powerup_interval_s = 15`), then one every 15 s. A new one never drops while another is still on
+- **When they drop:** only during a live duel. The first one comes 10 s after the duel starts
+  (`powerup_interval_s = 10`), then one every 10 s. A new one never drops while another is still on
   screen.
 - **Type:** a **GRENADE** (green) with chance `grenade_drop_chance = 25%`, otherwise a **ROCKET
   LAUNCHER** (orange). The pickup shows only its sprite, with no text label.
@@ -448,7 +448,7 @@ happens through bombs in practice mode).
 | | `enrol_max_samples`, `face_gallery_size`, `face_recent_size` | 90, 24, 12 |
 | Weapon reach | `hand_reach`, `gun_reach`, `rocket_reach`, `grenade_reach` | 0.06, 0.27, 0.38, 0.1 (x H) |
 | Display | `render_hz` | 60 |
-| Powerups | `powerup_interval_s`, `powerup_fall_s`, `powerup_radius`, `powerup_hit_scale`, `powerup_center_spread` | 15 s, 5 s, 0.08, 1.3, 0.05 |
+| Powerups | `powerup_interval_s`, `powerup_fall_s`, `powerup_radius`, `powerup_hit_scale`, `powerup_center_spread` | 10 s, 5 s, 0.08, 1.3, 0.05 |
 | Rocket | `rocket_speed`, `rocket_gravity`, `rocket_blast_radius`, `rocket_damage`, `rocket_min_damage` | 1.6, 1.3, 0.16, 50, 20 |
 | Grenade | `grenade_flight_s`, `grenade_arc`, `grenade_blast_radius`, `grenade_damage`, `grenade_min_damage`, `grenade_drop_chance` | 1.4 s, 0.45, 0.5, 80, 10, 0.25 |
 | Practice | `practice_powerup_interval_s`, `bomb_damage` | 10 s, 25 |
