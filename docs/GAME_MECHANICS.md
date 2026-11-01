@@ -68,7 +68,7 @@ be seen cannot get one.
   0.15 s. This was 5 s before; in a recorded session a third person stepped into the spot of a player
   whose body was missed for 0.2 s and was handed that player's ID by position.
 - **New bodies:** before the IDs are locked, new bodies take free IDs in order from left to right.
-- **Face embeddings:** every frame, each face is turned into a 128-number embedding (OpenCV SFace,
+- **Face embeddings:** on every 3rd frame (`face_id_every = 3`), each face is turned into a 128-number embedding (OpenCV SFace,
   aligned on the face mesh's eyes, nose and mouth). A face is skipped if its eyes are less than 18 px
   apart, or if it is turned more than about 30° (the nose is off-centre by more than half the distance
   between the eyes).
@@ -104,8 +104,10 @@ be seen cannot get one.
   This catches a stranger stepping into a player's spot, and IDs swapped when two players cross (both
   are released, then recognised again by face). On the recorded session above, the time an ID spent
   on the wrong person fell from 1.60 s (longest 0.33 s) to 0.27 s (single frames only).
-- **Bystanders:** `extra_people = 1` more body and face than there are players is detected, so a
-  bystander is seen and refused rather than hiding a player from the detector.
+- **Bystanders:** only as many bodies as there are players are tracked (`extra_people = 0`). Allowing a
+  third body made MediaPipe re-run its person detector on every frame and cost 12 ms of pose time, the
+  difference between 26 and 33 fps (`docs/PERFORMANCE.md`, decision 16). A stranger whose body is
+  tracked instead of a player's is still refused the id by face.
 - **Faces and hands:** faces are matched to the nearest nose, within one face size. Hands are matched
   to the nearest pose wrist, within `max(60 px, 0.8 × shoulder width)`.
 

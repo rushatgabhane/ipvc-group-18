@@ -302,6 +302,32 @@ costs more than the whole render pass and is a candidate for optimisation, along
 Reproduce: `python -m highnoon --metrics-csv results/session_metrics.csv`, play, then
 `python tools/task_latency.py results/session_metrics.csv`.
 
+### 16. 30 fps with two players: track only the players, face ID every 3rd frame
+With two players the game ran at 23-27 fps. Benchmarked by replaying the demo session's camera clip
+(`clips/session_20261101_122227.mp4`, 900 frames) headless and unpaced, so the number is the pipeline's
+throughput:
+
+| Change | Throughput | Pose | Face path (face + face ID) | Latency |
+|---|---|---|---|---|
+| Before | 24.2 fps | 38.2 ms | 21.8 + 15.3 ms | 54.9 ms |
+| Face ID every 3rd frame | 24.6 fps | 38.2 ms | 22.3 + 1/3 of it | - |
+| Hand model on every 2nd frame (rejected) | 24.7 fps | 37.9 ms | 21.8 + 14.3 ms | - |
+| Track 2 bodies instead of 3 | 26.6 fps | 25.8 ms | 22.0 + 13.3 ms | - |
+| **Both: 2 bodies + face ID every 3rd frame** | **32.8 fps** | 25.3 ms | 21.8 + 1/3 | **43.8 ms** |
+
+- **Why tracking 3 bodies was slow:** in VIDEO mode MediaPipe skips its person detector while it tracks
+  as many bodies as allowed. With `num_poses = 3` (two players plus a bystander slot) and two people in
+  view, it ran the detector on every frame looking for the third: 12 ms per frame.
+- **The hand model was not the cause:** running it on every other frame changed nothing; it runs
+  asynchronously on its own thread.
+- **Identity cost** (replay of `session_20261101_1053`, with the third person walking in): ids showed a
+  wrong face in 6 single checks (0.20 s) instead of 8 (0.27 s), and bodies waited without an id in 429
+  player-frames instead of 522. With face checks every 3rd frame a single wrong check can stand for up
+  to 0.1 s on screen, so the worst case is about 0.6 s.
+- **Trade-off:** a third person in view can now take one of the two tracked body slots, so a player may
+  briefly be untracked while a bystander stands in the picture; the face check still refuses the
+  bystander an id.
+
 ## Report evaluation checklist
 
 The project description (section 4.2.1) asks every task section of the report for **technical

@@ -21,8 +21,10 @@ class CaptureConfig:
 @dataclass
 class PerceptionConfig:
     max_players: int = 2
-    # Bystanders are detected too, so a third person is seen (and refused an id) rather than hiding a player.
-    extra_people: int = 1
+    # Bodies tracked beyond the players. 0: in tracking mode MediaPipe re-runs its person detector on every
+    # frame while it tracks fewer bodies than allowed, so allowing a third body for bystanders cost 12 ms of
+    # pose time per frame with two players (38 -> 26 ms). Strangers are still refused an id by face.
+    extra_people: int = 0
     max_hands: int = 4
     delegate: str = "auto"
     min_detection_confidence: float = 0.5
@@ -32,7 +34,9 @@ class PerceptionConfig:
     face_model_path: Path = MODELS_DIR / "face_landmarker.task"
     hand_model_path: Path = MODELS_DIR / "hand_landmarker.task"
     face_id_model_path: Path = MODELS_DIR / "face_recognition_sface_2021dec.onnx"
-    face_id_every: int = 1
+    # Face embeddings on every 3rd frame (10 per second): identity checks are timed in tenths of a second,
+    # and this takes 15 ms off the face path on two frames out of three.
+    face_id_every: int = 3
 
 
 @dataclass
