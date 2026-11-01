@@ -21,6 +21,9 @@ PENDING_GAP_S = 0.4
 RECENT_FACE_SCORES = 3
 CANDIDATE_SAMPLES = 8
 FACE_TOP_K = 3
+# Faces in a row scoring below face_reject that release a slot at once: a single blurred crop of the real
+# player can score that low, two in a row only happen when it is somebody else.
+CLEAR_MISMATCHES = 2
 
 
 @dataclass(eq=False)
@@ -37,6 +40,7 @@ class Candidate:
 class Doubt:
     first_t: float
     last_t: float
+    clear_mismatches: int = 0  # consecutive faces scoring below face_reject
 
 
 @dataclass
@@ -103,6 +107,18 @@ class IdentityTracker:
 
         self._attach_hands(perception)
         return self.players
+
+    def owner_similarity(self, player: Player) -> float | None:
+        """How well the face on a player's body matches that slot's owner (for logging), or None."""
+        slot = player.id - 1
+        face = player.face
+        if face is None or face.embedding is None or not self._has_face(slot):
+            return None
+        return float(self._face_similarity(slot, face.embedding[None])[0])
+
+    def unassigned_people(self, perception: Perception) -> int:
+        """Bodies in view without an id: strangers, or players waiting for their face to be recognised."""
+        return max(0, len(perception.poses) - sum(p.visible for p in self.players))
 
     def _release_lost_players(self, t: float) -> None:
         for slot, player in enumerate(self.players):
@@ -177,15 +193,26 @@ class IdentityTracker:
             if similarity >= self.cfg.face_accept:
                 self._doubts.pop(slot, None)
                 continue
+            if similarity < self.cfg.face_reject and self._is_another_player(slot, embedding):
+                self._release(assignment, detection, slot)  # clearly the other player: no need to wait
+                continue
             doubt = self._doubts.get(slot)
             if doubt is None or t - doubt.last_t > PENDING_GAP_S:
                 doubt = self._doubts[slot] = Doubt(t, t)
             doubt.last_t = t
-            if t - doubt.first_t >= self.cfg.verify_confirm_s:
-                del assignment[detection]
-                del self._doubts[slot]
-                self._active[slot] = False
-                self._last_center[slot] = None
+            doubt.clear_mismatches = doubt.clear_mismatches + 1 if similarity < self.cfg.face_reject else 0
+            if doubt.clear_mismatches >= CLEAR_MISMATCHES or t - doubt.first_t >= self.cfg.verify_confirm_s:
+                self._release(assignment, detection, slot)
+
+    def _release(self, assignment: dict[int, int], detection: int, slot: int) -> None:
+        del assignment[detection]
+        self._doubts.pop(slot, None)
+        self._active[slot] = False
+        self._last_center[slot] = None
+
+    def _is_another_player(self, slot: int, embedding: np.ndarray) -> bool:
+        others = [s for s in range(len(self.players)) if s != slot and self._claimed[s] and self._has_face(s)]
+        return any(self._face_similarity(s, embedding[None])[0] >= self.cfg.face_accept for s in others)
 
     def _return_known_players(
         self,

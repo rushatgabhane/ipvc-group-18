@@ -18,6 +18,13 @@ from highnoon.vision.face_id import FaceEmbedder
 
 FINGERTIPS = [8, 12, 16, 20]
 WRIST, MIDDLE_KNUCKLE = 0, 9
+# The face detector is short-range: it shrinks its input to 128x128, so on a whole 1280x720 frame a face
+# 2-3 m away is only a few pixels wide and is missed. Faces are therefore looked for in a square around
+# each body's head (from the previous frame's pose), sized from the body so the face fills the crop.
+POSE_NOSE, POSE_EARS, POSE_SHOULDERS = 0, (7, 8), (11, 12)
+HEAD_CROP_PER_SHOULDER = 1.6
+HEAD_CROP_PER_EARS = 3.5
+MIN_HEAD_CROP_PX = 160
 
 
 class Perceiver:
@@ -31,6 +38,10 @@ class Perceiver:
         guard = self.guard
         self.pose = guard.call("pose", create_with_fallback, create_pose_landmarker, cfg, delegate, "pose")
         self.face = guard.call("face", create_with_fallback, create_face_landmarker, cfg, delegate, "face")
+        self.face_crops = guard.call(
+            "face", create_with_fallback, create_face_crop_landmarker, cfg, delegate, "face crops"
+        )
+        self._head_boxes: list[tuple[int, int, int, int]] = []
         hand = guard.call("hand", create_with_fallback, create_hand_landmarker, cfg, delegate, "hand")
         self.hands = HandWorker(hand, guard) if hand is not None else None
         self.face_id = guard.call("face_id", FaceEmbedder, cfg.face_id_model_path)
@@ -39,7 +50,8 @@ class Perceiver:
     def __call__(self, frame: Frame) -> Perception:
         timings: dict[str, float] = {}
         t0 = time.perf_counter()
-        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(frame.image, cv2.COLOR_BGR2RGB))
+        rgb = cv2.cvtColor(frame.image, cv2.COLOR_BGR2RGB)
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         timings["convert"] = elapsed_ms(t0)
         if self.hands is not None:
             self.hands.submit(frame, image)
@@ -54,11 +66,18 @@ class Perceiver:
 
         t_infer = time.perf_counter()
         pose_future = self._pose_thread.submit(detect, "pose", self.pose)
-        face_result = detect("face", self.face)
         width, height = frame.size
         faces = []
-        if face_result is not None:
-            faces = self.guard.call("face", convert_faces, face_result, width, height, fallback=[])
+        if self._head_boxes and self.face_crops is not None:
+            started = time.perf_counter()
+            faces = self.guard.call(
+                "face", faces_in_crops, self.face_crops, rgb, self._head_boxes, fallback=[]
+            )
+            timings["face"] = elapsed_ms(started)
+        else:  # nobody seen yet: search the whole frame (finds only faces close to the camera)
+            face_result = detect("face", self.face)
+            if face_result is not None:
+                faces = self.guard.call("face", convert_faces, face_result, width, height, fallback=[])
         if self.face_id is not None and frame.id % self.cfg.face_id_every == 0:
             started = time.perf_counter()
             for face in faces:
@@ -72,6 +91,7 @@ class Perceiver:
         if pose_result is not None:
             poses = self.guard.call("pose", convert_poses, pose_result, width, height, fallback=[])
             mask = self.guard.call("pose", merge_person_masks, pose_result)
+        self._head_boxes = [head_box(pose, width, height) for pose in poses]
         hands, timings["hand"] = self.hands.latest() if self.hands is not None else ([], 0.0)
         timings["hand_lag"] = float(frame.id - hands[0].frame_id) if hands else 0.0
         timings["postprocess"] = elapsed_ms(t_post)
@@ -81,7 +101,7 @@ class Perceiver:
         self._pose_thread.shutdown(wait=True)
         if self.hands is not None:
             self.guard.call("hand", self.hands.close)
-        for name, landmarker in (("pose", self.pose), ("face", self.face)):
+        for name, landmarker in (("pose", self.pose), ("face", self.face), ("face", self.face_crops)):
             if landmarker is not None:
                 self.guard.call(name, landmarker.close)
 
@@ -119,6 +139,55 @@ def create_face_landmarker(cfg: PerceptionConfig, delegate):
             min_tracking_confidence=cfg.min_tracking_confidence,
         )
     )
+
+
+def create_face_crop_landmarker(cfg: PerceptionConfig, delegate):
+    """Single images (no tracking between frames), because each crop moves with its player."""
+    return vision.FaceLandmarker.create_from_options(
+        vision.FaceLandmarkerOptions(
+            base_options=base_options(cfg.face_model_path, delegate),
+            running_mode=vision.RunningMode.IMAGE,
+            num_faces=2,
+            min_face_detection_confidence=cfg.min_detection_confidence,
+            min_face_presence_confidence=cfg.min_presence_confidence,
+        )
+    )
+
+
+def head_box(pose: PoseObservation, width: int, height: int) -> tuple[int, int, int, int]:
+    """A square around a body's head, big enough for the face at any distance, kept inside the frame."""
+    kp = pose.keypoints
+    shoulders = float(np.linalg.norm(kp[POSE_SHOULDERS[0]] - kp[POSE_SHOULDERS[1]]))
+    ears = float(np.linalg.norm(kp[POSE_EARS[0]] - kp[POSE_EARS[1]]))
+    side = max(HEAD_CROP_PER_SHOULDER * shoulders, HEAD_CROP_PER_EARS * ears, MIN_HEAD_CROP_PX)
+    side = int(min(side, width, height))
+    cx, cy = kp[POSE_NOSE]
+    x0 = int(np.clip(cx - side / 2, 0, width - side))
+    y0 = int(np.clip(cy - side / 2, 0, height - side))
+    return x0, y0, x0 + side, y0 + side
+
+
+def faces_in_crops(
+    landmarker, rgb: np.ndarray, boxes: list[tuple[int, int, int, int]]
+) -> list[FaceObservation]:
+    faces: list[FaceObservation] = []
+    for x0, y0, x1, y1 in boxes:
+        crop = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb[y0:y1, x0:x1]))
+        for face in convert_faces(landmarker.detect(crop), x1 - x0, y1 - y0):
+            face.landmarks += (x0, y0)
+            face.bbox += (x0, y0, x0, y0)
+            faces.append(face)
+    return without_duplicates(faces)
+
+
+def without_duplicates(faces: list[FaceObservation]) -> list[FaceObservation]:
+    """Two heads close together put the same face in both crops: keep it once."""
+    kept: list[FaceObservation] = []
+    for face in faces:
+        size = float(face.bbox[2] - face.bbox[0])
+        if all(np.linalg.norm(face.center() - other.center()) > 0.5 * size for other in kept):
+            kept.append(face)
+    return kept
 
 
 def create_hand_landmarker(cfg: PerceptionConfig, delegate):

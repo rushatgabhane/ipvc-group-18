@@ -239,7 +239,7 @@ class Hud:
         reload_y = card_top - 34 * scale
         if state.frame.ducked and state.ammo < game.cfg.max_ammo and game.mode == "duel":
             self._draw_reload_bar(image, cx, reload_y, state.frame.reload_progress, scale)
-        ducked_for = state.frame.ducked_for if state.frame.ducked else 0.0
+        ducked_for = game.camped_for(state)
         if game.mode == "duel" and ducked_for >= game.cfg.camp_warning_s:
             warning = CAMPER_WARNING if ducked_for >= game.cfg.camp_grace_s else GET_UP_WARNING
             self._draw_camping_warning(image, warning, cx, reload_y - 52 * scale, t, scale)
@@ -443,7 +443,15 @@ def debug_lines(game: Game, player: Player) -> list[str]:
         f"ammo {game.states[player.id].ammo}",
         hand,
         ignored_fist_line(game.states[player.id], game.now),
+        position_line(player),
     ]
+
+
+def position_line(player: Player) -> str:
+    if player.position_m is None:
+        return "position: unknown"
+    x, _, z = player.position_m
+    return f"position x {x:+.2f} m  distance {z:.2f} m"
 
 
 def ignored_fist_line(state, t: float) -> str:

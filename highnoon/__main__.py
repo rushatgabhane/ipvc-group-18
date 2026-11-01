@@ -6,6 +6,7 @@ from pathlib import Path
 
 from highnoon.app import run
 from highnoon.config import Config
+from highnoon.core.guard import parse_faults
 
 
 def parse_args() -> Config:
@@ -36,6 +37,15 @@ def parse_args() -> Config:
     parser.add_argument(
         "--practice", action="store_true", help="single-player target practice: shoot bottles, no duel"
     )
+    parser.add_argument(
+        "--fail-module",
+        action="append",
+        default=[],
+        metavar="NAME[:P]",
+        help="make a module fail on purpose (always, or with probability P), e.g. hand, face:0.3",
+    )
+    parser.add_argument("--hfov", type=float, default=70.0, help="camera horizontal field of view in degrees")
+    parser.add_argument("--identity-csv", type=Path, help="write per-frame identity state per player")
     args = parser.parse_args()
 
     cfg = Config()
@@ -53,6 +63,9 @@ def parse_args() -> Config:
     cfg.games_csv = None if args.no_games_csv else args.games_csv
     cfg.record_video = args.record
     cfg.max_frames = args.max_frames
+    cfg.faults = parse_faults(args.fail_module)
+    cfg.filters.camera_hfov_deg = args.hfov
+    cfg.identity_csv = args.identity_csv
     cfg.game.practice = args.practice
     if args.practice:
         cfg.games_csv = None

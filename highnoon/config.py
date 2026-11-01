@@ -41,14 +41,16 @@ class FilterConfig:
     beta: float = 0.05
     d_cutoff: float = 1.0
     min_visibility: float = 0.5
+    camera_hfov_deg: float = 70.0  # horizontal field of view, for positions in metres
 
 
 @dataclass
 class TrackingConfig:
     max_match_distance: float = 0.25
     lost_timeout_s: float = 5.0
-    # Past this, a missing player can only come back by face: a body near where they left could be anyone.
-    track_gap_s: float = 5.0
+    # An id follows a body by position only across a dropped frame or two. After a longer gap the player can
+    # only come back by face: someone else stepping into the spot they left would otherwise take their id.
+    track_gap_s: float = 0.15
     reid_confirm_s: float = 0.15
     enrol_max_samples: int = 90
     face_accept: float = 0.36
@@ -87,8 +89,12 @@ class GameConfig:
     rocket_reach: float = 0.38
     grenade_reach: float = 0.1
     round_end_s: float = 5.0
-    countdown_s: float = 5.0
-    come_back_after_s: float = 1.0
+    countdown_s: float = 3.0
+    # A player has to be gone this long before the "waiting for player" message shows, so a dropped frame
+    # or two never flashes it up.
+    come_back_after_s: float = 3.0
+    # Players have to be in (or out of) view this long before the game switches between waiting and countdown.
+    mode_switch_hold_s: float = 3.0
     leave_timeout_s: float = 5.0
     powerup_interval_s: float = 15.0
     powerup_fall_s: float = 5.0
@@ -138,3 +144,5 @@ class Config:
     games_csv: Path | None = Path("results/games.csv")
     record_video: Path | None = None
     max_frames: int | None = None
+    identity_csv: Path | None = None
+    faults: dict[str, float] = field(default_factory=dict)

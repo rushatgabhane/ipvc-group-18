@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import cv2
 import numpy as np
 
@@ -73,17 +75,8 @@ class Renderer:
 
         # Faces are still tracked behind the wall, so their effects only get the picture above it.
         above_wall = image[: self.scenery.wall_top]
-        for player in players:
-            if player.visible and player.face is not None:
-                face = player.face
-                if player.face_smoothed is not None:
-                    points = player.face_smoothed
-                    face = FaceObservation(points, np.concatenate([points.min(axis=0), points.max(axis=0)]))
-                state = game.states.get(player.id)
-                if state is not None:
-                    hp_fraction = state.hp / game.cfg.max_hp
-                    draw_face_damage(above_wall, face, player.id, hp_fraction, t - state.last_hit_t)
-                self.face_fx.draw(above_wall, face, PLAYER_COLORS.get(player.id, WHITE))
+        with profiler.stage("face_fx") if profiler is not None else nullcontext():
+            self._draw_face_effects(above_wall, players, game, t)
 
         self.fx.update(t, game.effects)
         self.world.draw(image, game, t, dt)
@@ -96,6 +89,20 @@ class Renderer:
             draw_stats(image, profiler, len(perception.poses), len(perception.faces))
         self.shake = self.fx.shake_offset(t)
         return image
+
+    def _draw_face_effects(self, above_wall: np.ndarray, players: list[Player], game: Game, t: float) -> None:
+        for player in players:
+            if player.visible and player.face is not None:
+                face = player.face
+                if player.face_smoothed is not None:
+                    points = player.face_smoothed
+                    face = FaceObservation(points, np.concatenate([points.min(axis=0), points.max(axis=0)]))
+                state = game.states.get(player.id)
+                if state is not None:
+                    hp_fraction = state.hp / game.cfg.max_hp
+                    draw_face_damage(above_wall, face, player.id, hp_fraction, t - state.last_hit_t)
+                if player.head is not None:
+                    self.face_fx.draw(above_wall, player.head)
 
     def _draw_wall(self, image: np.ndarray) -> None:
         scenery = self.scenery

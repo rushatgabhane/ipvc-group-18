@@ -81,7 +81,7 @@ def step(game, players_fn, frames, t):
 
 def start_duel(players_fn=duel):
     game = Game(GameConfig(), (1280, 720))
-    t = step(game, players_fn, int(game.cfg.countdown_s / DT) + 2, 0.0)
+    t = step(game, players_fn, int((game.cfg.mode_switch_hold_s + game.cfg.countdown_s) / DT) + 5, 0.0)
     assert game.mode == "duel"
     return game, t
 
@@ -296,12 +296,24 @@ def test_countdown_starts_only_with_both_players_and_blocks_shooting():
     game = Game(GameConfig(), (1280, 720))
     t = step(game, alone, 10, 0.0)
     assert game.mode == "idle"
-    t = step(game, duel, 1, t)
+    t = step(game, duel, int(game.cfg.mode_switch_hold_s / DT) - 2, t)
+    assert game.mode == "idle", "players must stay in view for a moment before the countdown starts"
+    t = step(game, duel, 5, t)
     assert game.mode == "countdown" and game.countdown_left(t) > 2.5
     t = fire(game, t, settle_frames=20)
     assert game.states[2].hp == 100 and game.states[1].ammo == game.cfg.max_ammo
     step(game, duel, int(game.cfg.countdown_s / DT), t)
     assert game.mode == "duel"
+
+
+def test_a_player_flickering_out_of_view_does_not_cancel_the_countdown():
+    game = Game(GameConfig(), (1280, 720))
+    t = step(game, duel, int(game.cfg.mode_switch_hold_s / DT) + 2, 0.0)
+    assert game.mode == "countdown"
+    t = step(game, alone, int(1 / DT), t)
+    assert game.mode == "countdown"
+    t = step(game, alone, int(game.cfg.mode_switch_hold_s / DT), t)
+    assert game.mode == "idle"
 
 
 def test_three_headshots_do_not_kill():
@@ -339,9 +351,9 @@ def test_player_leaving_keeps_the_duel_and_asks_them_back():
     def p2_gone():
         return [make_player(1, 300), Player(id=2, last_seen=left_at)]
 
-    t = step(game, p2_gone, int(0.5 / DT), t)
+    t = step(game, p2_gone, int((game.cfg.come_back_after_s - 0.5) / DT), t)
     assert game.mode == "duel" and game.missing_players == []
-    t = step(game, p2_gone, int(2 / DT), t)
+    t = step(game, p2_gone, int(1 / DT), t)
     assert game.mode == "duel" and game.missing_players == [2]
     assert 0 < game.leave_countdown(2) < game.cfg.leave_timeout_s
     step(game, duel, 2, t)
@@ -380,7 +392,7 @@ def test_in_between_updates_on_the_same_frame_do_not_fire_twice():
 
 def start_practice():
     game = Game(GameConfig(practice=True), (1280, 720))
-    t = step(game, alone, int(game.cfg.countdown_s / DT) + 2, 0.0)
+    t = step(game, alone, int((game.cfg.mode_switch_hold_s + game.cfg.countdown_s) / DT) + 5, 0.0)
     assert game.mode == "duel"
     return game, t
 
@@ -425,7 +437,12 @@ def test_practice_shatters_one_of_several_bottles():
 
 def test_practice_with_one_player_never_asks_anyone_to_come_back():
     game, t = start_practice()
-    step(game, lambda: [make_player(1, 300)], int((game.cfg.come_back_after_s + game.cfg.leave_timeout_s) / DT) + 5, t)
+    step(
+        game,
+        lambda: [make_player(1, 300)],
+        int((game.cfg.come_back_after_s + game.cfg.leave_timeout_s) / DT) + 5,
+        t,
+    )
     assert game.missing_players == []
 
 

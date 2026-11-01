@@ -1,19 +1,14 @@
 from __future__ import annotations
+
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-# Whole eye outlines: averaging them is far steadier than the single corner landmarks.
-LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
-RIGHT_EYE = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466]
-FOREHEAD, CHIN = 10, 152
-HAT_LIFT = 0.69  # eye centre to hat centre, in face heights: unlike eye spacing it survives turning the head
-HAT_WIDTH = 1.5
+from highnoon.contracts import HeadAnchor
 
 
 class FaceEffectRenderer:
-
     def __init__(self, alpha: float = 0.9):
 
         self.alpha = float(np.clip(alpha, 0.0, 1.0))
@@ -34,39 +29,13 @@ class FaceEffectRenderer:
             size = (sprite.shape[1] // 2, sprite.shape[0] // 2)
             self.sprites.append(cv2.resize(sprite, size, interpolation=cv2.INTER_AREA))
 
-    def draw(self, image: np.darray, face,
-             color=None) -> np.darray:
-
-        points = np.asarray(face.landmarks, dtype = np.float32)
-        x1, y1, x2, y2 = np.asarray(face.bbox).reshape(-1)[:4]
-        face_width = float(x2-x1)
-        face_height = float(y2-y1)
-
-        if face_width < 4 or face_height < 4:
+    def draw(self, image: np.ndarray, head: HeadAnchor) -> np.ndarray:
+        """Draws the hat where the (already smoothed) head anchor puts it."""
+        center_x, center_y = (float(v) for v in head.center)
+        angle = head.angle
+        target_width = head.width
+        if target_width < 4:
             return image
-
-        angle = 0.0
-
-        if len(points) > max(LEFT_EYE + RIGHT_EYE + [FOREHEAD, CHIN]):
-            left_eye = points[LEFT_EYE, :2].mean(axis=0)
-            right_eye = points[RIGHT_EYE, :2].mean(axis=0)
-
-            angle = float(np.arctan2(
-                right_eye[1] - left_eye[1],
-                right_eye[0] - left_eye[0]
-            ))
-
-            eye_center = (left_eye + right_eye) / 2
-            lift = HAT_LIFT * float(np.linalg.norm(points[CHIN, :2] - points[FOREHEAD, :2]))
-
-            center_x = float(eye_center[0] + lift * np.sin(angle))
-            center_y = float(eye_center[1] - lift * np.cos(angle))
-
-        else:
-            center_x = float((x1 + x2) / 2)
-            center_y = float(y1 - face_height * 0.35)
-
-        target_width = face_width * HAT_WIDTH
         sprite = next((s for s in reversed(self.sprites) if s.shape[1] >= target_width), self.hat)
         h, w = sprite.shape[:2]
         scale = target_width / w
@@ -87,10 +56,14 @@ class FaceEffectRenderer:
 
         matrix[0, 2] -= x0
         matrix[1, 2] -= y0
-        hat_crop = cv2.warpAffine(sprite, matrix, (x_end - x0, y_end - y0),
-                                  flags = cv2.INTER_LINEAR,
-                                  borderMode = cv2.BORDER_CONSTANT,
-                                  borderValue = (0,0,0,0))
+        hat_crop = cv2.warpAffine(
+            sprite,
+            matrix,
+            (x_end - x0, y_end - y0),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0, 0),
+        )
 
         rgb = hat_crop[:, :, :3].astype(np.float32)
         alpha = hat_crop[:, :, 3:4].astype(np.float32) / 255

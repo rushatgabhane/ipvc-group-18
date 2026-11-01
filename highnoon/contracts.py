@@ -41,6 +41,15 @@ class FaceObservation:
 
 
 @dataclass(slots=True)
+class HeadAnchor:
+    """Where a hat sits: its centre, tilt (radians, clockwise in image space) and width in pixels."""
+
+    center: np.ndarray
+    angle: float
+    width: float
+
+
+@dataclass(slots=True)
 class HandObservation:
     landmarks: np.ndarray
     openness: float
@@ -76,6 +85,9 @@ class Player:
     pose: PoseObservation | None = None
     face: FaceObservation | None = None
     face_smoothed: np.ndarray | None = None
+    head: HeadAnchor | None = None
+    # Metres from the camera: x right, y down, z away. Estimated from the torso length (tracking/spatial.py).
+    position_m: np.ndarray | None = None
     hands: dict[int, HandObservation] = field(default_factory=dict)
     smoothed: np.ndarray | None = None
     signals: MotionSignals | None = None

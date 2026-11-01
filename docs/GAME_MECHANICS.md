@@ -21,25 +21,25 @@ player shoots bottles instead of an opponent.
 ## 2. Game flow (`highnoon/game/game.py`)
 
 ```
-idle ──(2 players visible)──► countdown (5 s) ──► duel ──(someone hits 0 HP)──► K.O. + winner screen (5 s)
-  ▲                               │                 │                                  │
-  └──(a player lost)──────────────┘                 │           countdown (5 s) ◄──────┘
-                                                    │
-                                                    └──(a player away for 6 s)──► forfeit (game over)
+idle ──(2 players visible for 3 s)──► countdown (3 s) ──► duel ──(someone hits 0 HP)──► K.O. + winner screen (5 s)
+  ▲                                        │                 │                                  │
+  └──(a player lost for 3 s)───────────────┘                 │           countdown (3 s) ◄──────┘
+                                                             │
+                                                             └──(a player away for 8 s)──► forfeit (game over)
 ```
 
 | Mode | What happens |
 |---|---|
-| **idle** | Fewer than two players are visible. The screen shows "TWO PLAYERS / STEP INTO VIEW". |
-| **countdown** | 5-4-3-2-1 (`countdown_s = 5.0`). Nobody can fire. The first countdown of the session also shows "HANDING OUT PLAYER IDS" (section 3). If a player leaves view, the game goes back to idle. When it ends, the round is reset, the announcer says "FIGHT!" (voice and on-screen text) and the duel starts. |
+| **idle** | Fewer than two players are visible. The screen shows "TWO PLAYERS / STEP INTO VIEW". Both players must stay in view for `mode_switch_hold_s = 3.0` s before the countdown starts, so a player flickering in and out of detection does not make the screen flash between the two. |
+| **countdown** | 3-2-1 (`countdown_s = 3.0`). Nobody can fire. The first countdown of the session also shows "HANDING OUT PLAYER IDS" (section 3). If a player is out of view for `mode_switch_hold_s = 3.0` s, the game goes back to idle; a shorter dropout does not cancel the countdown. The duel only starts once both players are in view. When it starts, the round is reset, the announcer says "FIGHT!" (voice and on-screen text). |
 | **duel** | The round is live. Shots, damage, powerups and the camping penalty all apply. The mode only changes if a player stays away long enough to forfeit. |
 | **round over** | Starts when a player's HP reaches 0. "K.O.!" is announced (1.3 s, with voice), then the winner screen ("PLAYER n WINS THE ROUND", "NEXT ROUND IN n") is shown. The whole phase lasts `round_end_s = 5.0` s from the moment of the K.O., then a new countdown begins. Nobody can deal damage, and the duck, reload and status text is hidden. |
 | **forfeit** | A player stayed away too long. The screen dims and shows "PLAYER n: YOU LOSE" for the missing player. No win is scored, bullets, rockets and grenades in flight are removed, and no new round starts. The only way out is to quit and restart the program. |
 
 - **A player who leaves during a duel:** nothing is paused. Once they have been out of view for more
-  than `come_back_after_s = 1.0` s, "P*n*: WAITING FOR PLAYER ID" and "GAME ENDS IN n s" appear in
-  their colour. If they have no ID again `leave_timeout_s = 5.0` s after that (6 s in total), they
-  forfeit. The other player can still move and fire meanwhile. The message disappears once they are
+  than `come_back_after_s = 3.0` s (long enough that a dropped frame never flashes it up),
+  "P*n*: WAITING FOR PLAYER ID" and "GAME ENDS IN n s" appear in their colour. If they have no ID
+  again `leave_timeout_s = 5.0` s after that (8 s in total), they forfeit. The other player can still move and fire meanwhile. The message disappears once they are
   recognised (section 3). The same timer runs during the winner screen, where the message is hidden.
 - **Round reset:** HP goes back to 100 and ammo to 3. Rockets, grenades, bullets in flight and the
   falling powerup are all removed. Scores are kept.
@@ -55,9 +55,11 @@ be seen cannot get one.
 
 - **Following a player:** each frame, detected bodies are matched to IDs by the distance between body
   centres, using Hungarian assignment (`linear_sum_assignment`). A body can only be matched to an ID if
-  it moved less than `max_match_distance = 0.25 W` since the last frame. This works across gaps of up
-  to `track_gap_s = 5` s, such as ducking. A player who was out of view for longer needs their face
-  recognised to get their ID back.
+  it moved less than `max_match_distance = 0.25 W` since the last frame. Position alone only bridges
+  a dropped frame or two (`track_gap_s = 0.15` s). After a longer gap, even a short one such as a
+  missed detection, the player needs their face recognised to get their ID back, which takes about
+  0.15 s. This was 5 s before; in a recorded session a third person stepped into the spot of a player
+  whose body was missed for 0.2 s and was handed that player's ID by position.
 - **New bodies:** before the IDs are locked, new bodies take free IDs in order from left to right.
 - **Face embeddings:** every frame, each face is turned into a 128-number embedding (OpenCV SFace,
   aligned on the face mesh's eyes, nose and mouth). A face is skipped if its eyes are less than 18 px
@@ -83,10 +85,18 @@ be seen cannot get one.
 - **Waiting without an ID:** a body with no face seen yet, or scoring at least `face_reject = 0.2`, is
   held without an ID while the evidence builds up. It has no hat, HUD or hitbox, and shots pass through
   it. After the lock, nobody else can get an ID, even while a player is away.
-- **Face check:** this runs before and during the duel. A body followed by position whose face stays
-  below `face_accept` for `verify_confirm_s = 0.3` s loses the ID. This catches a stranger stepping
-  into a player's spot, and IDs swapped when two players cross (both are released, then recognised
-  again by face).
+- **Face check:** this runs before and during the duel. A body followed by position loses the ID when
+  its face is not a confirmed match for the owner:
+  - at once if the face scores below `face_reject` for the owner and at least `face_accept` for the
+    other player (the two players swapped places);
+  - after 2 faces in a row below `face_reject` (about 0.07 s), which only happens with a different
+    person (a single blurred crop of the real player can score that low, two in a row do not);
+  - otherwise after `verify_confirm_s = 0.3` s of faces below `face_accept` (a stranger who scores
+    somewhere in between).
+
+  This catches a stranger stepping into a player's spot, and IDs swapped when two players cross (both
+  are released, then recognised again by face). On the recorded session above, the time an ID spent
+  on the wrong person fell from 1.60 s (longest 0.33 s) to 0.27 s (single frames only).
 - **Bystanders:** `extra_people = 1` more body and face than there are players is detected, so a
   bystander is seen and refused rather than hiding a player from the detector.
 - **Faces and hands:** faces are matched to the nearest nose, within one face size. Hands are matched
@@ -176,6 +186,8 @@ cancels the small hand movement that comes with closing the fist.
 - After `camp_grace_s = 7` s ducked, **GET OUT CAMPER!** is shown, and the player loses
   `5% of max HP = 5 HP` every `camp_drain_interval_s = 1` s until they stand up. The first loss
   happens right at 7 s.
+- Only time ducked since the round started counts, so a player crouching through the countdown is
+  not drained the moment the duel begins.
 - The drain only applies during a live duel while an opponent is visible. It counts as damage from
   the opponent, so camping down to 0 HP gives the opponent the round.
 
@@ -331,9 +343,18 @@ These effects only change the picture; none of them affect the rules.
 ## 6c. Face effects (`render/face_damage.py`, `render/face_fx.py`)
 
 Face tracking uses Google's **MediaPipe Face Landmarker** (`models/face_landmarker.task`, float16),
-not a custom model. It runs in VIDEO (tracking) mode for up to `max_players + extra_people` faces and
-gives 478 points per face: 468 for the face mesh and 10 for the irises. The expression (blendshape)
-output is not enabled.
+not a custom model. It gives 478 points per face: 468 for the face mesh and 10 for the irises. The
+expression (blendshape) output is not enabled.
+
+- **Head crops:** the landmarker's face detector is a short-range model that shrinks its input to
+  128x128, so on the whole 1280x720 frame a face 2-3 m away is only a few pixels wide and is missed.
+  Faces are therefore looked for in a square around each body's head, taken from the previous frame's
+  pose: centred on the nose, `max(1.6 x shoulder width, 3.5 x ear distance, 160 px)` wide, in IMAGE
+  mode (each crop moves with its player, so there is no tracking between frames). A face found in two
+  overlapping crops is kept once. Before anyone is detected, the whole frame is searched in VIDEO mode.
+- **Measured:** on a recorded two-player session (900 frames), a face was found for 97.4% of visible
+  players, against 33.5% on the whole frame. The face step costs 22 ms instead of 11 ms, which stays
+  hidden behind pose inference (39 ms) running in parallel.
 
 The effects stop at the top of the wall, because the face is still tracked behind it. A face partly
 behind the wall only shows them above the wall's top edge. The hat rises well above the head, so a
@@ -351,7 +372,7 @@ reset for the next round.
 | 100–76 | none |
 | 75–51 | blood spatter on one cheek |
 | 50–26 | adds a bruised eye socket on the other side, and a smaller blood spatter on that cheek |
-| 25–0 | adds a nosebleed and a pale, drained complexion (20% towards gray) |
+| 25–0 | adds a nosebleed |
 
 - **Built from photos:** the bruise and blood come from real photos (`assets/sprites/face/`, made by
   `tools/make_face_decals.py`, credits in `assets/CREDITS.md`).
@@ -366,8 +387,8 @@ reset for the next round.
 - **Steadied:** the landmarks go through a One Euro filter (`min_cutoff 1.0`, `beta 0.08`) so the
   injuries do not shake with the face tracking.
 - **Hit flash:** all damage also reddens the face, including each camping drain tick. Blue and green
-  drop by up to 18% and recover over `0.25` s (the same time as the HUD card flash). This and the pale
-  complexion are soft tints over the whole face, eyes and mouth included.
+  drop by up to 18% and recover over `0.25` s (the same time as the HUD card flash). It is a soft tint over
+  the whole face, eyes and mouth included.
 - **Turning away:** triangles facing away from the camera are not drawn. When the nose is off-centre by
   more than `12%` of the face width, the nearest 250 triangles (the nose and the middle of the face)
   are also drawn over the rest, so the nose hides injuries on the far cheek.
@@ -385,11 +406,18 @@ The landmarks are also used for a **cowboy hat** (`assets/sprites/cowboy_hat.png
 the facial damage. Both players get the same sprite.
 
 - **Where:** it is drawn for every visible player whose face is detected, in every mode (idle,
-  countdown, duel, practice). It is `1.5 ×` the face width wide, centred `1.3 ×` the distance between
-  the outer eye corners above the point between them, and drawn at 90% opacity under the name tag and
-  HP bar.
-- **Tilt:** the hat turns with the head roll, measured as the angle of the line between the outer eye
-  corners (landmarks 33 and 263). Its position follows the tilt too.
+  countdown, duel, practice). It is `1.5 ×` the face width wide, centred `0.69 ×` the forehead-to-chin
+  distance above the point between the eyes (unlike the eye spacing, that distance survives turning
+  the head), and drawn at 90% opacity under the name tag and HP bar.
+- **Tilt:** the hat turns with the head roll, measured as the angle of the line between the centres of
+  the two whole eye outlines (16 landmarks each, much steadier than single corner points). Its
+  position follows the tilt too. It does not turn in 3D when the player looks sideways or nods.
+- **Smoothing (`vision/head.py`):** the hat's centre, tilt and width are measured from the raw face
+  each frame and smoothed with One Euro filters, instead of smoothing all 478 landmarks separately
+  (each with its own noisy speed, which bent the face shape and made the tilt wobble). Centre:
+  `min_cutoff 1.0, beta 0.01`; tilt: `0.6, 0.3`; width: `0.4, 0.002`, so position follows quick head
+  moves while tilt and size change smoothly. The filters are kept through a missed face for up to
+  0.5 s, so the hat glides back instead of jumping.
 - **No effect on play:** the hat adds nothing to the hitbox. Most of it sits above the head circle
   (section 5.1), which reaches only a little above the face box, so a shot through the top of the hat
   misses. In a test with the face mesh's flat layout, about a fifth of the hat fell inside the circle.
@@ -413,8 +441,8 @@ happens through bombs in practice mode).
 | Ammo | `max_ammo`, `reload_s` | 3, 0.8 s |
 | Camping | `camp_warning_s`, `camp_grace_s`, `camp_drain_fraction`, `camp_drain_interval_s` | 5 s, 7 s, 0.05, 1 s |
 | Damage | `max_hp`, `body_damage`, `head_damage`, `bullet_travel_s` | 100, 10, 25, 0.6 s |
-| Flow | `countdown_s`, `round_end_s`, `come_back_after_s`, `leave_timeout_s` | 5, 5, 1, 5 s |
-| Tracking | `max_match_distance`, `track_gap_s`, `lost_timeout_s` | 0.25 (x W), 5 s, 5 s |
+| Flow | `countdown_s`, `round_end_s`, `come_back_after_s`, `leave_timeout_s`, `mode_switch_hold_s` | 3, 5, 3, 5, 3 s |
+| Tracking | `max_match_distance`, `track_gap_s`, `lost_timeout_s` | 0.25 (x W), 0.15 s, 5 s |
 | Face ID | `face_accept`, `face_reject`, `face_margin`, `face_min_samples` | 0.36, 0.2, 0.1, 2 |
 | | `reid_confirm_s`, `verify_confirm_s` | 0.15, 0.3 s |
 | | `enrol_max_samples`, `face_gallery_size`, `face_recent_size` | 90, 24, 12 |

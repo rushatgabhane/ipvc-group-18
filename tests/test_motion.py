@@ -144,3 +144,30 @@ def test_face_landmarks_are_smoothed_and_dropped_with_the_face():
     p.face = None
     mf.update([p], 2 / 30, set())
     assert p.face_smoothed is None
+
+
+def test_head_anchor_is_steadier_than_raw_and_survives_a_dropped_frame():
+    from highnoon.vision.head import measure_head
+    from tests.test_renderer import make_face
+
+    rng = np.random.default_rng(0)
+    mf = MotionFilter(FilterConfig())
+    face = make_face(300.0)
+    raw_x, smooth_x = [], []
+    p = Player(id=1, visible=True)
+    for i in range(90):
+        noisy = face.landmarks + rng.normal(0, 2, face.landmarks.shape).astype(np.float32)
+        p.face = FaceObservation(noisy, face.bbox)
+        mf.update([p], i / 30, set())
+        raw_x.append(measure_head(p.face).center[0])
+        smooth_x.append(p.head.center[0])
+    assert np.std(smooth_x[30:]) < np.std(raw_x[30:]) * 0.5
+
+    held = p.head.center.copy()
+    p.face = None
+    mf.update([p], 90 / 30, set())
+    assert p.head is None
+    p.face = FaceObservation(face.landmarks + 40.0, face.bbox + 40.0)
+    mf.update([p], 91 / 30, set())
+    # The filter was kept, so the hat glides towards the new spot instead of snapping there.
+    assert np.linalg.norm(p.head.center - held) < 40.0

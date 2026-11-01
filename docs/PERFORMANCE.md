@@ -158,6 +158,151 @@ Real-time replay with the new settings: 29.9 fps, 0 dropped frames, render 3.3 m
 The capture thread overwrites a single slot instead of filling a queue. If any stage gets slow,
 frames are dropped (logged as `dropped`) rather than delayed, so latency cannot accumulate.
 
+### 10. Faces looked for in head crops, not the whole frame (T1)
+Live play showed the hat and face damage missing most of the time. On a recorded two-player session
+(`clips/session_20261101_1041.mp4`, players about 2 m away) the face landmarker found **0 faces** on a
+full 1280x720 frame and **1 face in each half** of the same frame. Its detector is a short-range model
+that shrinks the input to 128x128, so at play distance a face is only a few pixels wide. Faces are now
+looked for in a square around each body's head, from the previous frame's pose (`head_box()` in
+`vision/perception.py`).
+
+| Same 900 frames, two players | Faces found for visible players | Face step (mean / p95) |
+|---|---|---|
+| Whole frame, VIDEO mode (before) | 33.5% | 10.9 / 19.0 ms |
+| **Head crops, IMAGE mode (after)** | **97.4%** | 22.0 / 23.1 ms |
+
+The face step runs in parallel with pose inference (39 ms), so the extra cost does not lengthen the
+frame. Face ID (SFace) needs a face, so identity checks were starved too before this fix.
+
+### 11. Hat anchor smoothed instead of every landmark (T1)
+The hat used to be placed from all 478 landmarks, each smoothed by its own One Euro filter with its
+own noisy speed, which bent the face shape and made the tilt wobble; a missed face reset the filter,
+so the hat jumped. Now the hat's centre, tilt and width are measured once per frame and only those are
+smoothed (`vision/head.py`), and the filters survive a missed face for 0.5 s. Unit test on a noisy
+synthetic face: the smoothed centre has less than half the jitter of the raw one. Jitter and lag on
+real footage: see section 14 (tilt jitter down 91%, size 93%).
+
+### 12. Identity takeover fixed (T3)
+In a live test, a third person stepped into Player 1's spot while Player 1's body was missed for
+0.2 s, and got Player 1's ID: position tracking bridged gaps of up to `track_gap_s = 5` s, and the face
+check only released the ID after 0.3 s of mismatches. Changes: position alone only bridges 0.15 s
+(after that the face must confirm), the other player's face releases an ID at once, and two clearly
+different faces in a row (below `face_reject`) release it within about 0.07 s. Replayed with identical
+detections through both versions:
+
+| Recording | Tracker | Time an ID showed the wrong face | Episodes | Longest | Body in view without an ID |
+|---|---|---|---|---|---|
+| `session_20261101_1053` (third person walks in) | old | 1.60 s | 13 | 0.33 s | 428 player-frames |
+| | **new** | **0.27 s** | 8 | **0.03 s** | 522 player-frames |
+| `session_20261101_1041` (two players) | old | 0 s | 0 | – | 8 |
+| | **new** | 0 s | 0 | – | 20 |
+
+"Wrong face" means the face on an ID scored below 0.2 against its owner. The cost is a few more frames
+in which a returning player waits to be recognised (12 extra player-frames, 0.4 s, in a 105 s session).
+Live re-test (`session_20261101_1106`, 183 s, 3 games): 5 wrong-face frames in about 7,100 face checks,
+longest 0.1 s, and no IDs handed out after enrolment.
+
+### 13. Live sessions, two players (1 Nov 2026)
+
+| Session | Length | FPS | Latency mean / p95 | Pose | Face | Face ID | Hands | Render | Dropped |
+|---|---|---|---|---|---|---|---|---|---|
+| `1041` (before face crops) | 105 s | 24.2 | 74.4 / 89.8 ms | 39.1 ms | 15.2 ms | 12.1 ms | 59.5 ms | 3.6 ms | 0.2 fr |
+| `1053` (face crops) | 87 s | 30.0 | 40.9 / 43.3 ms | 26.4 ms | 10.4 ms | 6.9 ms | 19.3 ms | 2.1 ms | 0 |
+| `1106` (identity fix) | 183 s | 24.3 | – | – | – | – | – | – | 0.2 fr |
+
+The two-player frame rate varied between sessions (24-30 fps) with the same code, following the hand
+model (19-60 ms) and pose (26-39 ms) times, so the machine's load matters. Hands run asynchronously, so
+a slow hand model raises hand lag (up to 4 frames at p95) rather than dropping frames. These rows
+replace the single-person frame budget at the top as the realistic two-player numbers. The full
+per-module numbers of `1053`, replayed offline, are in section 14.
+
+### 14. Per-task evaluation of a recorded session (`tools/evaluate_clip.py`)
+`session_20261101_1053` (69 s, two players, a third person walking in), replayed frame by frame with
+the identity fix. Full output: `results/session_20261101_1053_eval.md`. Replayed offline every frame is
+processed (no frame dropping), so module times are a little higher than live.
+
+**Module cost (ms, mean / p95):** pose 37.7 / 47.6, face (head crops) 21.7 / 31.3, face ID 16.1 / 27.1,
+hands (own thread) 32.4 / 65.3, tracking 0.26 / 0.35, filtering 0.25 / 0.36, face effects 2.0 / 3.1.
+Pose and face run in parallel, so inference is 40.1 / 56.6.
+
+**Detection:** a face was found for 96.8% (P1) and 94.7% (P2) of the frames the player was visible.
+Only 55% of the 33 pose keypoints are above confidence 0.5, because the legs and hips are below the
+picture or behind the wall; the controls use shoulders, arms and hands, which are kept.
+
+**Smoothing (jitter = per-frame noise after removing smooth motion; lag = delay of the filtered
+signal):**
+
+| Signal | Raw jitter | Smoothed | Reduction | Lag |
+|---|---|---|---|---|
+| Shoulder centre (P1 / P2) | 1.6 / 1.2 px | 0.6 / 0.4 px | 64-69% | 0-4 ms |
+| Right wrist (P1 / P2) | 5.4-6.6 / 2.5 px | 3.1-3.8 / 1.3 px | 43-49% | 0 ms |
+| Hat centre | 0.4-0.7 px | 0.07-0.18 px | 75-84% | 0-16 ms |
+| Hat tilt | 0.30-0.34° | 0.03° | 91-92% | 26-27 ms |
+| Hat width | 0.5-0.6 px | 0.03-0.04 px | 93-94% | 59-63 ms |
+
+The wrist is smoothed least on purpose: One Euro raises its cutoff with speed, so a fast aim is not
+delayed. The hat's size is smoothed hardest, because it changes slowly and its jitter is most visible
+as "breathing"; its 60 ms lag only shows when walking towards the camera.
+
+**Identity:** against each player's faces from their first 4 s, the ID agreed with the face in 100%
+(P1, 1844 checks) and 99.0% (P2, 1245) of frames, with no disagreement lasting 0.3 s or more. 24 gaps
+(12 under 0.5 s, detection dropouts); median re-identification wait 0.17 s, p95 1.75 s. The 10.7 s
+gap is P2 leaving the picture. Face match scores: same person mean 0.81 (5th percentile 0.62), best
+other person mean 0.09 (95th percentile 0.19), so `face_accept = 0.36` rejects 0.8% of real matches
+and accepts 0.1% of other people, and `face_reject = 0.2` sits just above 95% of other people.
+
+**Position (metres, from the torso):** median distance P1 1.59 m, P2 1.85 m; distance jitter 0.5 cm.
+The players' real distances were not measured in this session, so the error is still to be checked at
+taped distances (recording protocol, step 5). Known limit: the estimate assumes a 0.50 m torso, so it
+is off by the same fraction as a player's torso differs (about ±10% between adults), and leaning
+towards the camera makes the torso look shorter and the player look further away.
+
+## Report evaluation checklist
+
+The project description (section 4.2.1) asks every task section of the report for **technical
+evaluation, experiment results, measured frame rate or latency, accuracy, and significant failure
+cases**, and every task owner to state what does not work reliably (3.2.6). Status per task:
+
+| Task | Required evidence | Where it comes from | Status |
+|---|---|---|---|
+| T1 Face | ≥2 faces detected under movement, turning, distance | `evaluate_clip.py` detection table; section 10 | done on recordings |
+| | Jitter raw vs smoothed and the lag it adds (hat) | `evaluate_clip.py` smoothing table | done on recordings |
+| | Effects never switch players | identity tables (T3), section 12 | done |
+| | Behaviour on short face loss | hat filter kept 0.5 s; face crops | done; show in video |
+| | Cost | face 22 ms, face effects 0.5 ms | done |
+| T2 Pose | Pose cost with two people | sections 13-14 | done |
+| | Keypoint jitter raw vs filtered, filter delay | `evaluate_clip.py` smoothing table | done on recordings |
+| | Unreliable keypoints (confidence < 0.5) | `evaluate_clip.py` detection table | done |
+| | Missing keypoints do not trigger actions | demo: cover a hand / arm; `games.csv` ignored fists | **to record** |
+| | Duck and fist accuracy | `games.csv` over ~10 games, scripted clip with known ducks/shots | **to record** |
+| T3 Identity | Consistency, switches, crossing, occlusion, re-entry | `evaluate_clip.py` identity tables, section 12 | done; add scripted clips |
+| | Thresholds justified by score distributions | `evaluate_clip.py` face match scores | done |
+| | Position in metres and its reliability | `tracking/spatial.py`, `evaluate_clip.py` position table | **measure error at taped 2 m / 3 m** |
+| | Module cost | tracking 0.2 ms, face ID 7-12 ms | done |
+| T4 Game | Action recognition accuracy, cooldowns | `results/games.csv` | **play ~10 games** |
+| | Simultaneous actions, fist-to-shot delay | scripted clip | **to record** |
+| T5 Integration | End-to-end FPS and latency, two players | section 13 | done |
+| | Bottlenecks and what was done | sections 1-13 | done |
+| | Module failures handled | `--fail-module hand` / `face` / `tracking` run | **to run and note** |
+| | Glass-to-glass latency | phone slow-motion of the screen | **to measure** |
+| All | Owners named in README and report | README "Team and task ownership" | **fill in names** |
+
+### Recording protocol for the remaining clips
+Record each with `--record clips/<name>.mp4 --identity-csv results/<name>_identity.csv`, then run
+`tools/evaluate_clip.py` on it. Say the step out loud so the times can be checked in the video.
+
+1. **crossing** (60 s): both players stand still 5 s, swap places 5 times at walking speed, then once
+   with one passing behind the other.
+2. **occlusion** (40 s): one player steps in front of the other for 2 s, 5 times.
+3. **re-entry** (60 s): P2 leaves for 2 s, then 6 s, then 12 s, and comes back each time.
+4. **stranger** (60 s): during a duel a third person walks in while P2 is away, stands in P2's spot,
+   then leaves; then P2 returns.
+5. **distance** (40 s): each player stands 5 s at taped 1.5 m, 2.0 m, 3.0 m from the camera (for the
+   position error and face detection by distance).
+6. **controls** (60 s): each player ducks 10 times and fires 10 times on a count, then both fire
+   together 5 times.
+7. **failure** (30 s each): `--fail-module hand`, `--fail-module face`, `--fail-module tracking:0.2`.
+
 ## Platform issues found
 
 - **GPU delegate:** aborts the process on macOS at graph creation, so macOS uses CPU. MediaPipe
@@ -176,11 +321,11 @@ frames are dropped (logged as `dropped`) rather than delayed, so latency cannot 
 
 ## TODO (measure next)
 
-- [ ] **Two players in frame**: pose cost per extra person (the landmark model runs once per body).
+- [x] **Two players in frame**: see section 13.
 - [ ] The exhibition laptop, if different, plus behaviour on battery power.
 - [ ] Glass-to-glass latency (camera sensor + display) with a phone slow-motion video of a
       flashing timer. The `latency` metric only covers capture -> on screen in software.
-- [ ] The cost of real game rendering (sprites, particles) once T4/T5 add it.
+- [x] The cost of real game rendering: 2.1-3.6 ms with two players (section 13).
 
 ## 8d. Wrist crops for the hand model (tested, not adopted)
 

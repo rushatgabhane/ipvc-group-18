@@ -8,6 +8,8 @@ import numpy as np
 from highnoon.config import FilterConfig
 from highnoon.contracts import HandObservation, MotionSignals, Player
 from highnoon.core.filters import OneEuroFilter
+from highnoon.tracking.spatial import locate
+from highnoon.vision.head import HeadFilter, measure_head
 
 NOSE = 0
 L_SHOULDER, R_SHOULDER, L_WRIST, R_WRIST = 11, 12, 15, 16
@@ -49,18 +51,22 @@ class MotionFilter:
         self.cfg = cfg
         self._keypoint_filters: dict[int, OneEuroFilter] = {}
         self._face_filters: dict[int, OneEuroFilter] = {}
+        self._head_filters: dict[int, HeadFilter] = {}
         self._aiming_hand: dict[int, int] = {}
         self._torso_len: dict[int, float] = {}
         self._aim: dict[int, SmoothedAim] = {}
         self._last_palm: dict[tuple[int, int], tuple[float, PalmAim]] = {}
 
-    def update(self, players: list[Player], t: float, reassigned: set[int]) -> None:
+    def update(
+        self, players: list[Player], t: float, reassigned: set[int], frame_size: tuple[int, int] | None = None
+    ) -> None:
         for player in players:
             if player.id in reassigned:
                 self._forget(player.id)
             self._smooth_face(player, t)
             if player.pose is None:
                 player.signals = None
+                player.position_m = None
                 continue
             reliable = player.pose.visibility >= self.cfg.min_visibility
             player.smoothed = self._keypoint_filter(player.id)(player.pose.keypoints, t, mask=reliable)
@@ -68,10 +74,16 @@ class MotionFilter:
             player.signals.hand_openness = self._aiming_hand_openness(player)
             player.signals.head_y = head_height(player)
             self._smooth_aim(player.id, player.signals, t)
+            player.position_m = None
+            if frame_size is not None:
+                shoulders = (player.smoothed[L_SHOULDER] + player.smoothed[R_SHOULDER]) / 2
+                torso = player.signals.torso_len
+                player.position_m = locate(shoulders, torso, frame_size, self.cfg.camera_hfov_deg)
 
     def _forget(self, player_id: int) -> None:
         self._keypoint_filter(player_id).reset()
         self._face_filters.pop(player_id, None)
+        self._head_filters.pop(player_id, None)
         self._aiming_hand.pop(player_id, None)
         self._torso_len.pop(player_id, None)
         self._aim.pop(player_id, None)
@@ -82,9 +94,12 @@ class MotionFilter:
         if player.face is None:
             self._face_filters.pop(player.id, None)
             player.face_smoothed = None
+            player.head = None  # the head filter lives on, so a brief miss does not make the hat jump back in
             return
         face_filter = self._face_filters.setdefault(player.id, OneEuroFilter(FACE_MIN_CUTOFF, FACE_BETA))
         player.face_smoothed = face_filter(player.face.landmarks, t)
+        raw = measure_head(player.face)
+        player.head = None if raw is None else self._head_filters.setdefault(player.id, HeadFilter())(raw, t)
 
     def _keypoint_filter(self, player_id: int) -> OneEuroFilter:
         if player_id not in self._keypoint_filters:

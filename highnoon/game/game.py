@@ -62,6 +62,8 @@ class Game:
         self._hitboxes: dict[int, Hitbox] = {}
         self._wall = self.wall
         self._t = 0.0
+        self._in_view = False
+        self._in_view_since = 0.0
 
     def update(self, players: list[Player], t: float, reassigned: set[int]) -> None:
         self._t = t
@@ -71,7 +73,11 @@ class Game:
         self._create_states(players, reassigned)
         self._update_mode(sum(p.visible for p in players) >= (1 if self.cfg.practice else 2), t)
         self._check_forfeit(t)
-        if self.forfeited is None and self.round_over_t is not None and t - self.round_over_t >= self.cfg.round_end_s:
+        if (
+            self.forfeited is None
+            and self.round_over_t is not None
+            and t - self.round_over_t >= self.cfg.round_end_s
+        ):
             self.reset_round()
             self.mode, self.countdown_end_t = "countdown", t + self.cfg.countdown_s
         self._update_powerup(t)
@@ -130,11 +136,16 @@ class Game:
         return max(0.0, self.countdown_end_t - t) if self.mode == "countdown" else 0.0
 
     def _update_mode(self, both_in_view: bool, t: float) -> None:
-        if self.mode == "idle" and both_in_view:
+        # Only act on a change that has lasted, so a player flickering in and out of detection
+        # does not bounce the screen between "step into view" and the countdown.
+        if both_in_view != self._in_view:
+            self._in_view, self._in_view_since = both_in_view, t
+        settled = t - self._in_view_since >= self.cfg.mode_switch_hold_s
+        if self.mode == "idle" and both_in_view and settled:
             self.mode, self.countdown_end_t = "countdown", t + self.cfg.countdown_s
-        elif self.mode == "countdown" and not both_in_view:
+        elif self.mode == "countdown" and not both_in_view and settled:
             self.mode = "idle"
-        elif self.mode == "countdown" and t >= self.countdown_end_t:
+        elif self.mode == "countdown" and both_in_view and t >= self.countdown_end_t:
             self.reset_round()
             self.mode = "duel"
 
@@ -188,8 +199,14 @@ class Game:
             self.effects.append(Effect("reload", pos, t, player_id))
         state.ammo = self.cfg.max_ammo
 
+    def camped_for(self, state: PlayerState) -> float:
+        """How long a player has stayed ducked this round; time crouched before it started does not count."""
+        if not state.frame.ducked:
+            return 0.0
+        return min(state.frame.ducked_for, max(0.0, self._t - self.round_start_t))
+
     def _drain_if_camping(self, player_id: int, state: PlayerState, t: float) -> None:
-        camping = state.frame.ducked and state.frame.ducked_for >= self.cfg.camp_grace_s
+        camping = self.camped_for(state) >= self.cfg.camp_grace_s
         opponent = self._opponent_of(player_id)
         if not (camping and self.round_live and opponent is not None):
             state.next_camp_drain_t = None

@@ -11,6 +11,7 @@ from highnoon.render import renderer as renderer_module
 from highnoon.render.face_damage import UV
 from highnoon.render.face_fx import FaceEffectRenderer
 from highnoon.render.renderer import Renderer, inset_box
+from highnoon.vision.head import measure_head
 
 WIDTH, HEIGHT = 1280, 720
 WALL_TOP = int(HEIGHT * (1 - GameConfig().cover_height))
@@ -32,7 +33,11 @@ def picture(face: FaceObservation | None, smoothed: np.ndarray | None = None) ->
     renderer.world.draw = renderer.hud.draw = lambda *args: None  # only the face effects are under test
     image = np.full((HEIGHT, WIDTH, 3), 128, np.uint8)
     perception = Perception(Frame(0, image, 0.0, 0), [], [], None, 0.0)
-    return renderer.render(perception, [Player(id=1, face=face, face_smoothed=smoothed, visible=True)], game, None)
+    head = None
+    if face is not None:
+        head = measure_head(face if smoothed is None else FaceObservation(smoothed, face.bbox))
+    player = Player(id=1, face=face, face_smoothed=smoothed, head=head, visible=True)
+    return renderer.render(perception, [player], game, None)
 
 
 def test_a_face_above_the_wall_gets_its_effects():
@@ -47,7 +52,7 @@ def test_all_face_effects_follow_the_smoothed_face():
 def hat_rise() -> int:
     """How far the hat reaches above the top of the face."""
     canvas = np.zeros((2000, 2000, 3), np.uint8)
-    FaceEffectRenderer().draw(canvas, make_face(1000.0))
+    FaceEffectRenderer().draw(canvas, measure_head(make_face(1000.0)))
     return 1000 - int(np.flatnonzero(canvas.any(axis=(1, 2))).min())
 
 
@@ -103,5 +108,5 @@ def test_the_inset_makes_way_for_the_debug_stats(monkeypatch):
 def test_hat_is_drawn_for_a_face_without_eye_landmarks():
     canvas = np.zeros((HEIGHT, WIDTH, 3), np.uint8)
     face = make_face(300.0)
-    FaceEffectRenderer().draw(canvas, FaceObservation(face.landmarks[:10], face.bbox))
+    FaceEffectRenderer().draw(canvas, measure_head(FaceObservation(face.landmarks[:10], face.bbox)))
     assert canvas.any()

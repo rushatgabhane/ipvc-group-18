@@ -15,7 +15,6 @@ MIN_FACE_PX = 24
 ROI_PAD = 0.05
 FACE_MESH_POINTS = 468
 WORK_FACE_PX = 110
-PALLOR = 0.2
 FLASH_TINT = np.array([0.55, 0.55, 1.0], np.float32)
 FLASH_STRENGTH = 0.4
 BASE_SIZE = 512
@@ -76,18 +75,11 @@ class Warp:
     work_shape: tuple[int, int]
     shade: np.ndarray | None
     _skin: np.ndarray | None = None
-    _pallor: np.ndarray | None = None
 
     def skin(self) -> np.ndarray:
         if self._skin is None:
             self._skin = face_weight(self.points, self.work_shape)
         return self._skin
-
-    def pallor(self) -> np.ndarray:
-        if self._pallor is None:
-            full_size = (self.shape[1], self.shape[0])
-            self._pallor = cv2.resize(self.skin(), full_size, interpolation=cv2.INTER_LINEAR) * PALLOR
-        return self._pallor
 
 
 # Reused for the redraws between camera frames.
@@ -126,10 +118,6 @@ def draw_face_damage(
         redden = 1.0 - (warp.skin() * (FLASH_STRENGTH * flash))[:, :, None] * (1.0 - FLASH_TINT)
         tint = cv2.resize((redden * 255).astype(np.uint8), (roi.shape[1], roi.shape[0]))
         cv2.multiply(roi, tint, dst=roi, scale=1 / 255)
-    if stage >= 3:
-        weight = warp.pallor()
-        gray = cv2.cvtColor(cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
-        roi[:] = cv2.blendLinear(gray, roi, weight, 1.0 - weight)
 
 
 def build_warp(

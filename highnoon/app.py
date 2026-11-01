@@ -5,6 +5,7 @@ import time
 from highnoon.config import Config
 from highnoon.core.capture import open_source
 from highnoon.core.guard import ModuleGuard
+from highnoon.core.identity_log import IdentityLog
 from highnoon.core.match_log import MatchLog
 from highnoon.core.profiler import Profiler
 from highnoon.core.recorder import SessionRecorder
@@ -25,7 +26,7 @@ KEY_HELP = "q/esc quit | r restart round | h simulate a hit | d debug overlay | 
 
 
 def run(cfg: Config) -> Profiler:
-    guard = ModuleGuard()
+    guard = ModuleGuard(cfg.faults)
     profiler = Profiler(csv_path=cfg.metrics_csv)
     source = open_source(cfg.capture)
     worker = PerceptionWorker(source, Perceiver(cfg.perception, guard))
@@ -37,6 +38,7 @@ def run(cfg: Config) -> Profiler:
     sounds = guard.call("sound", SoundBoard) if display is not None and cfg.display.sound else None
     signal_log = guard.call("signal_log", SignalLog, cfg.signals_csv) if cfg.signals_csv else None
     match_log = guard.call("match_log", MatchLog, cfg.games_csv) if cfg.games_csv else None
+    identity_log = guard.call("identity_log", IdentityLog, cfg.identity_csv) if cfg.identity_csv else None
     recorder = (
         guard.call("recorder", SessionRecorder, cfg.record_video, cfg.capture.fps, cfg.capture.mirror)
         if cfg.record_video
@@ -82,7 +84,8 @@ def run(cfg: Config) -> Profiler:
                 with profiler.stage("tracking"):
                     players = guard.call("tracking", tracker.update, perception, fallback=players or [])
                 with profiler.stage("filter"):
-                    guard.call("motion", motion.update, players, frame.t_capture, tracker.reassigned)
+                    reassigned = tracker.reassigned
+                    guard.call("motion", motion.update, players, frame.t_capture, reassigned, frame.size)
                 with profiler.stage("game"):
                     game.width, game.height = frame.size
                     guard.call("game", game.update, players, t_game, tracker.reassigned)
@@ -91,7 +94,19 @@ def run(cfg: Config) -> Profiler:
                 if recorder is not None:
                     guard.call("recorder", recorder.add, frame.image)
                 if signal_log is not None:
-                    guard.call("signal_log", signal_log.record, frame.id, t_game, players, game, len(perception.hands))
+                    guard.call(
+                        "signal_log",
+                        signal_log.record,
+                        frame.id,
+                        t_game,
+                        players,
+                        game,
+                        len(perception.hands),
+                    )
+                if identity_log is not None:
+                    guard.call(
+                        "identity_log", identity_log.record, frame.id, t_game, players, tracker, perception
+                    )
                 with profiler.stage("camera"):
                     guard.call("render", renderer.set_camera, perception, players, game)
             else:
@@ -103,7 +118,14 @@ def run(cfg: Config) -> Profiler:
                 guard.call("sound", sounds.update, game, t_game)
             with profiler.stage("render" if fresh is not None else "tween"):
                 output = guard.call(
-                    "render", renderer.draw, perception, players, game, profiler, t_game, fallback=perception.frame.image
+                    "render",
+                    renderer.draw,
+                    perception,
+                    players,
+                    game,
+                    profiler,
+                    t_game,
+                    fallback=perception.frame.image,
                 )
 
             if display is not None:
@@ -111,7 +133,10 @@ def run(cfg: Config) -> Profiler:
                     keys = guard.call("display", display.show, output, renderer.shake)
                 display_failures = display_failures + 1 if keys is None else 0
                 if display_failures >= MAX_DISPLAY_FAILURES:
-                    print("[highnoon] display keeps failing and the game cannot be controlled; stopping", flush=True)
+                    print(
+                        "[highnoon] display keeps failing and the game cannot be controlled; stopping",
+                        flush=True,
+                    )
                     break
                 if guard.call("input", handle_keys, keys or [], cfg, game, display, fallback=False):
                     break
@@ -135,6 +160,8 @@ def run(cfg: Config) -> Profiler:
         guard.call("profiler", profiler.close)
         if signal_log is not None:
             guard.call("signal_log", signal_log.close)
+        if identity_log is not None:
+            guard.call("identity_log", identity_log.close)
         if match_log is not None:
             guard.call("match_log", match_log.close)
             print(f"{match_log.rounds} games appended to {match_log.path}")

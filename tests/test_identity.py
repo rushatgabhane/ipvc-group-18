@@ -41,13 +41,22 @@ def test_identity_follows_motion_regardless_of_detection_order():
     assert ids_by_x(players) == {1: 320, 2: 920}
 
 
-def test_identity_kept_through_short_loss():
+def test_identity_kept_through_a_dropped_frame():
     tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
     tr.update(perception(0.0, [pose_at(300), pose_at(900)]))
-    tr.update(perception(0.5, [pose_at(300)]))
-    players = tr.update(perception(0.8, [pose_at(300), pose_at(880)]))
+    tr.update(perception(0.033, [pose_at(300)]))
+    players = tr.update(perception(0.1, [pose_at(300), pose_at(880)]))
     assert ids_by_x(players) == {1: 300, 2: 880}
     assert tr.reassigned == set()
+
+
+def test_after_a_longer_gap_a_body_in_the_same_spot_needs_a_face_to_get_the_id():
+    tr = IdentityTracker(TrackingConfig(lost_timeout_s=1.0))
+    tr.update(perception(0.0, [pose_at(300), pose_at(900)]))
+    for i in range(1, 17):
+        tr.update(perception(i * 0.033, [pose_at(300)]))
+    players = tr.update(perception(0.56, [pose_at(300), pose_at(880)]))
+    assert ids_by_x(players) == {1: 300}
 
 
 def wide_pose(x: float) -> PoseObservation:
@@ -223,3 +232,37 @@ def test_stranger_who_steps_in_front_of_a_player_does_not_take_their_id():
         1: 300,
         2: 1100,
     }
+
+
+def test_someone_stepping_into_the_spot_of_a_player_who_dropped_out_never_gets_their_id():
+    # Recorded session: P1's body was missed for 0.2 s and a third person appeared 60 px away.
+    tr = IdentityTracker(TrackingConfig())
+    for i in range(10):
+        tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
+    tr.lock()
+    play(tr, [(300, ALICE), (900, BOB)], 0.5, seconds=0.5)
+    play(tr, [(900, BOB)], 1.05, seconds=0.2)
+    for i in range(20):
+        players = tr.update(scene(1.3 + i * 0.05, [(360, STRANGER), (900, BOB)]))
+        assert ids_by_x(players) == {2: 900}
+
+
+def test_the_other_players_face_on_an_id_releases_it_at_once():
+    tr = IdentityTracker(TrackingConfig())
+    for i in range(10):
+        tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
+    tr.lock()
+    play(tr, [(300, ALICE), (900, BOB)], 0.5, seconds=0.5)
+    players = tr.update(scene(1.05, [(300, BOB), (900, BOB)]))
+    assert 1 not in ids_by_x(players)
+
+
+def test_a_clearly_different_face_releases_the_id_within_two_frames():
+    tr = IdentityTracker(TrackingConfig())
+    for i in range(10):
+        tr.update(scene(i * 0.05, [(300, ALICE), (900, BOB)]))
+    tr.lock()
+    play(tr, [(300, ALICE), (900, BOB)], 0.5, seconds=0.5)
+    tr.update(scene(1.05, [(300, STRANGER), (900, BOB)]))
+    players = tr.update(scene(1.083, [(300, STRANGER), (900, BOB)]))
+    assert ids_by_x(players) == {2: 900}

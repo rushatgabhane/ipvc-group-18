@@ -97,7 +97,9 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 
 - **The game needs two players in view.** With fewer, it waits. When both are in view it counts
   down 3-2-1, and every new round starts with the same countdown. Nobody can shoot during it.
-  If a player is out of view for more than 5 s mid-game, the screen tells them to come back; the game only ends on a KO.
+  Both players have to stay in view for 3 s before the countdown starts, so nothing flickers when
+  someone is briefly missed. If a player is out of view for more than 3 s mid-game, the screen tells
+  them to come back; after 5 s more they forfeit.
 - **Duel.** A body hit costs 10 HP and a headshot 25 (4 headshots or 10 body hits to win). First to 0 loses the round.
   Bullets take 0.45 s to arrive, so you can duck when you see your opponent fire.
 - **Powerups (duel only).** Every 15 s a powerup drops from the top of the screen down the
@@ -155,7 +157,30 @@ misses), % of the remaining fists that fired (empty-gun clicks count as fired), 
 were ignored.
 
 `--metrics-csv` writes one row per frame with every stage's time, FPS and capture-to-screen
-latency, ready for the plots in the report. `docs/PERFORMANCE.md` records all measurements so
+latency, ready for the plots in the report. `--identity-csv` writes one row per player per frame:
+visible, new id, position in pixels and metres, whether a face was seen and how well it matched the
+id's owner, and how many people in view had no id.
+
+**Report numbers from a recording.** Record a session, then replay it frame by frame:
+
+```bash
+.venv/bin/python -m highnoon --record clips/session.mp4 --identity-csv results/session_identity.csv
+.venv/bin/python tools/evaluate_clip.py clips/session.mp4     # -> results/session_eval.md
+```
+
+`evaluate_clip.py` writes per-module times (pose, face, face ID, hands, tracking, filtering, face
+effects), face and keypoint detection rates, jitter of the shoulders, wrist and hat raw vs smoothed
+with the delay the smoothing adds, identity gaps and how long re-identification took, identity
+switches and consistency (checked against each player's faces from their first seconds), the face
+match score distributions behind the thresholds, and each player's distance in metres.
+
+**Module failures.** `--fail-module NAME[:P]` makes a module fail on purpose (every call, or with
+probability P), e.g. `--fail-module hand` or `--fail-module face:0.3`. Every module runs through
+`core/guard.py`, so the game keeps running without it and prints a summary of failures at exit.
+
+**Positions in metres.** Each player's distance and sideways offset are estimated from their torso
+length (`tracking/spatial.py`, assuming a 0.50 m torso and a 70° camera field of view; set yours with
+`--hfov`). Press `d` to show them on the debug overlay. `docs/PERFORMANCE.md` records all measurements so
 far and the decisions taken from them.
 
 ## Architecture
@@ -192,11 +217,18 @@ highnoon/
     filters.py         vectorised One Euro filter
     profiler.py        per-stage timing, FPS, latency, CSV export
     match_log.py       per-game evaluation stats appended to results/games.csv
+    signal_log.py      per-frame control signals (--signals-csv)
+    identity_log.py    per-frame identity state per player (--identity-csv)
+    guard.py           keeps the game running when a module fails; --fail-module injects failures
+    evaluation.py      jitter, filter lag, identity gap/switch metrics for the report
   vision/
-    perception.py      MediaPipe pose + face inference, parallel (T1/T2)
+    perception.py      MediaPipe pose + face (head crops) + hand inference, parallel (T1/T2)
+    face_id.py         SFace face embeddings for identity (T3)
+    head.py            hat anchor (centre, tilt, width) from the face mesh, smoothed (T1)
     motion.py          per-player keypoint smoothing + control signals (T2)
   tracking/
     identity.py        persistent player ids, face-to-player assignment (T3)
+    spatial.py         player position in metres from the torso length (T3)
   render/
     renderer.py        background compositing, wall, layer order, debug overlay (T5)
     world.py           held weapons, rocket/grenade arc previews, tracers, powerups, rockets, grenades, explosions
@@ -214,6 +246,7 @@ highnoon/
 tools/
   download_models.py   fetch + verify model weights
   analyze_clip.py      replay a clip through the game, log signals + detected actions
+  evaluate_clip.py     replay a clip and write the report's evaluation numbers (results/*_eval.md)
   record.py            record raw webcam clips for repeatable tests
 tests/                 pytest unit tests
 assets/fonts/          Rye and Bebas Neue (SIL Open Font License, licence files included)
