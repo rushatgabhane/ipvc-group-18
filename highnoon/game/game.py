@@ -38,6 +38,9 @@ ARC_PREVIEW_STEPS = 60
 
 # A target whose body was missed for this long is still there for a bullet already on its way to them.
 TARGET_DROPOUT_S = 0.3
+# How far (x frame height) a target may sway off a bullet's path and still be hit; further away dodges.
+SWAY_TOLERANCE = 0.05
+PATH_SAMPLE_PX = 8.0
 
 
 class Game:
@@ -360,10 +363,12 @@ class Game:
         self.bullets = in_flight
 
     def _still_on_target(self, bullet: Bullet) -> bool:
-        """A bullet that was on a player when fired hits them unless they ducked behind the wall.
+        """Whether a bullet that was on a player when fired still hits them although the new cast missed.
 
-        Ducking is the way to dodge. Without this, a small sway during the 0.6 s flight, or a frame in
-        which the target's body was not detected, let the bullet pass through a player it visibly reached.
+        It does when the player only swayed a little (still within `SWAY_TOLERANCE` of the path) or their
+        body was briefly not detected, which used to let bullets pass through a player they visibly
+        reached. Moving clearly out of the path, such as dropping into a duck before the head is fully
+        behind the wall, dodges it.
         """
         kind, target = bullet.aimed_at
         if kind not in ("head", "body"):
@@ -371,7 +376,12 @@ class Game:
         state, player = self.states.get(target), self._players.get(target)
         if state is None or player is None or state.frame.ducked:
             return False
-        return player.visible or self._t - player.last_seen <= TARGET_DROPOUT_S
+        box = self._hitboxes.get(target)
+        if box is None:  # body missed by the detector: still there if seen a moment ago
+            return not player.visible and self._t - player.last_seen <= TARGET_DROPOUT_S
+        return path_distance_to_hitbox(bullet.origin, bullet.direction, bullet.length, box) <= (
+            SWAY_TOLERANCE * self.height
+        )
 
     def _rocket_launch(self, direction: np.ndarray) -> tuple[np.ndarray, float]:
         speed = self.cfg.rocket_speed * self.height
@@ -665,6 +675,15 @@ def hitbox(player: Player) -> Hitbox:
 
 def splash_damage(distance: float, radius: float, center_damage: int, edge_damage: int) -> int:
     return round(center_damage - (center_damage - edge_damage) * distance / radius)
+
+
+def path_distance_to_hitbox(origin: np.ndarray, direction: np.ndarray, length: float, box: Hitbox) -> float:
+    """Closest distance between a bullet path (as drawn, to where it first met something) and a hitbox."""
+    # The path runs past the target by a little, so a target that moved slightly away still counts.
+    reach = length + float(np.linalg.norm(box.torso.max(axis=0) - box.torso.min(axis=0)))
+    steps = np.arange(0.0, reach + PATH_SAMPLE_PX, PATH_SAMPLE_PX, dtype=np.float32)
+    points = origin[None, :] + direction[None, :] * steps[:, None]
+    return min(distance_to_hitbox(point, box) for point in points)
 
 
 def distance_to_hitbox(point: np.ndarray, box: Hitbox) -> float:

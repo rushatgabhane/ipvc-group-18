@@ -232,12 +232,13 @@ The game starts at `max_hp = 100`. When a player fires, the weapon is chosen in 
   bullet with a faint streak.
 - **Travel time:** a bullet arrives `bullet_travel_s = 0.6` s after the shot. When it arrives, the
   ray is cast again from the original muzzle position, in the original direction, against the **current**
-  positions. **Ducking dodges it:** a player who ducks behind the wall in that time is protected.
-- **On target when fired:** if the ray hit a player when the shot was fired, it still hits them on
-  arrival unless they ducked, even if the new cast misses. Before, a small sway during the flight, or
-  a frame in which the target's body was not detected, let a bullet pass through a player it had
-  visibly reached. A target counts as present if they were seen in the last 0.3 s; one who has left
-  the picture is not hit.
+  positions. A player who ducks behind the wall, or moves clearly out of the path, dodges it.
+- **Small sway still hits:** if the ray hit a player when the shot was fired and the new cast misses,
+  it still hits them when they are within `SWAY_TOLERANCE = 0.05 x H` (about 36 px) of the path, or
+  their body was not detected on that frame but was seen in the last 0.3 s. Before, such a sway or a
+  missed frame let bullets pass through a player they had visibly reached. Further away counts as a
+  dodge: in a recorded take a player dropping into a duck had moved their head from 18% to 70% of the
+  height when the bullet arrived (the wall top is at 75%) and must not be hit.
 - **What it hits:** whatever the ray meets first:
   - the wall: "BLOCKED"
   - a ducked player: also cover, "BLOCKED"

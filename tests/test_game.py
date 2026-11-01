@@ -119,6 +119,39 @@ def test_a_bullet_on_target_hits_even_if_the_body_is_missed_when_it_arrives():
     assert game.states[2].hp == 100 - game.cfg.body_damage
 
 
+def test_dropping_out_of_the_path_dodges_before_the_head_is_behind_the_wall():
+    # Recorded: P1's head went from 18% to 70% of the height in the 0.6 s flight (the wall top is at 75%,
+    # so not "ducked" yet) and the bullet aimed at their head still hit.
+    game, t = start_duel()
+    t = step(game, duel, 12, t)
+    t = step(game, lambda: duel(hand=FIST), 1, t)
+    low = STANDING + 180  # head well below the shot's path, still above the wall top
+
+    def p2_dropping():
+        return [make_player(1, 300), make_player(2, 900, shoulder_y=low)]
+
+    step(game, p2_dropping, int(game.cfg.bullet_travel_s / DT) + 3, t)
+    assert not game.states[2].frame.ducked
+    assert game.states[2].hp == game.cfg.max_hp
+
+
+def test_a_bullet_still_hits_a_target_that_swayed_slightly_off_its_path():
+    from highnoon.game.entities import Bullet
+
+    game, t = start_duel()
+    box = game._hitboxes[2]
+    above = float(min(box.torso[:, 1].min(), box.head_center[1] - box.head_radius))
+    origin = np.array([400.0, 0.0], np.float32)
+    right = np.array([1.0, 0.0], np.float32)
+
+    def passing(gap):  # a horizontal path `gap` px above the top of P2's hitbox, aimed at them when fired
+        return Bullet(1, origin + (0, above - gap), right, 520.0, t, t + 0.6, ("body", 2))
+
+    assert game._cast(1, passing(20).origin, right)[1][0] == "miss"
+    assert game._still_on_target(passing(20))
+    assert not game._still_on_target(passing(100))
+
+
 def test_wall_is_static_and_blocks_low_shots():
     game = Game(GameConfig(), (1280, 720))
     game.update(duel(), 0.0, set())

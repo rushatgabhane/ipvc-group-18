@@ -101,8 +101,8 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
   cancel it, so nothing flickers when someone is briefly missed. If a player is out of view for more than 3 s mid-game, the screen tells
   them to come back; after 5 s more they lose the round (twice in a row loses the match).
 - **Duel.** A body hit costs 10 HP and a headshot 25 (4 headshots or 10 body hits to win). First to 0 loses the round.
-  Bullets take 0.6 s to arrive, so you can duck when you see your opponent fire. Ducking is the
-  only dodge: a bullet that was on you when it was fired hits unless you get behind the wall.
+  Bullets take 0.6 s to arrive, so you can duck when you see your opponent fire. Getting out of
+  the bullet's path dodges it; a small sway does not.
 - **Powerups (duel only).** Every 10 s a powerup drops from the top of the screen down the
   middle and disappears behind the wall. Whoever shoots it first gets it (lead your shot: it moves):
 
