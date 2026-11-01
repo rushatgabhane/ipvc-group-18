@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from contextlib import nullcontext
 
 import cv2
@@ -14,7 +15,7 @@ from highnoon.render.face_damage import draw_face_damage, preload_face_damage
 from highnoon.render.face_fx import FaceEffectRenderer
 from highnoon.render.fx import FX
 from highnoon.render.hud import Hud, draw_signal_debug
-from highnoon.render.palette import PLAYER_COLORS, WHITE
+from highnoon.render.palette import GOLD, PLAYER_COLORS, RED, WHITE
 from highnoon.render.scenery import Scenery
 from highnoon.render.world import WorldView
 
@@ -25,6 +26,7 @@ SKELETON = TORSO_BONES + ARM_BONES + LEG_BONES
 MASK_LOW, MASK_HIGH = 0.45, 0.9
 ERODE_KERNEL = np.ones((3, 3), np.uint8)
 MAX_FRAME_STEP_S = 0.1
+DEMO_SECONDS = 60
 STATS_SHOWN = ("latency", "inference", "pose", "face", "hand", "render")
 INSET_HEIGHT = 0.14
 INSET_MARGIN = 0.022
@@ -43,6 +45,7 @@ class Renderer:
         self.face_fx = FaceEffectRenderer()
         self.shake = (0, 0)
         self._t_last: float | None = None
+        self._timer_start: float | None = None
 
     def render(
         self, perception: Perception, players: list[Player], game: Game, profiler: Profiler
@@ -87,8 +90,22 @@ class Renderer:
         if self.cfg.show_debug:
             draw_signal_debug(image, game, players, PLAYER_COLORS)
             draw_stats(image, profiler, len(perception.poses), len(perception.faces))
+        if self.cfg.demo_timer:
+            self._draw_demo_timer(image)
         self.shake = self.fx.shake_offset(t)
         return image
+
+    def _draw_demo_timer(self, image: np.ndarray) -> None:
+        """Seconds since the first frame drawn, which is also the first frame of --record-output."""
+        now = time.perf_counter()
+        if self._timer_start is None:
+            self._timer_start = now
+        seconds = int(now - self._timer_start)
+        done = seconds >= DEMO_SECONDS
+        text = f"{min(seconds, DEMO_SECONDS)} / {DEMO_SECONDS} s" + ("  STOP" if done else "")
+        scale = image.shape[0] / 720.0
+        sprite = self.text.get(text, int(40 * scale), RED if done else GOLD, assets.HUD_FONT, stroke=3)
+        assets.blit_center(image, sprite, image.shape[1] - sprite.width / 2 - 20 * scale, 36 * scale)
 
     def _draw_face_effects(self, above_wall: np.ndarray, players: list[Player], game: Game, t: float) -> None:
         for player in players:

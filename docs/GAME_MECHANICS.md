@@ -21,7 +21,7 @@ player shoots bottles instead of an opponent.
 ## 2. Game flow (`highnoon/game/game.py`)
 
 ```
-idle ──(2 players visible for 3 s)──► countdown (3 s) ──► duel ──(someone hits 0 HP)──► K.O. + winner screen (5 s)
+idle ──(2 players visible for 0.5 s)──► countdown (3 s) ──► duel ──(someone hits 0 HP)──► K.O. + winner screen (5 s)
   ▲                                        │                 │                                  │
   └──(a player lost for 3 s)───────────────┘                 │           countdown (3 s) ◄──────┘
                                                              │
@@ -30,8 +30,8 @@ idle ──(2 players visible for 3 s)──► countdown (3 s) ──► duel �
 
 | Mode | What happens |
 |---|---|
-| **idle** | Fewer than two players are visible. The screen shows "TWO PLAYERS / STEP INTO VIEW". Both players must stay in view for `mode_switch_hold_s = 3.0` s before the countdown starts, so a player flickering in and out of detection does not make the screen flash between the two. |
-| **countdown** | 3-2-1 (`countdown_s = 3.0`), before the first round of a session and before a rematch. Nobody can fire. The first countdown of the session also shows "HANDING OUT PLAYER IDS" (section 3). If a player is out of view for `mode_switch_hold_s = 3.0` s, the game goes back to idle; a shorter dropout does not cancel the countdown. The duel only starts once both players are in view. When it starts, the round is reset, the announcer says "FIGHT!" (voice and on-screen text). |
+| **idle** | Fewer than two players are visible. The screen shows "TWO PLAYERS / STEP INTO VIEW". Both players must be in view for `start_hold_s = 0.5` s before the countdown starts. |
+| **countdown** | 3-2-1 (`countdown_s = 3.0`), before the first round of a session and before a rematch. Nobody can fire. If a player is out of view for `cancel_hold_s = 3.0` s, the game goes back to idle; a shorter dropout does not cancel the countdown, so nothing flickers. The duel only starts once both players are in view. When it starts, the round is reset, the announcer says "FIGHT!" (voice and on-screen text). |
 | **duel** | The round is live. Shots, damage, powerups and the camping penalty all apply. The mode only changes if a player stays away long enough to forfeit. |
 | **round over** | Starts when a player's HP reaches 0. "K.O.!" is announced (1.3 s, with voice), then the winner screen ("PLAYER n WINS THE ROUND", "NEXT ROUND IN n") is shown. The whole phase lasts `round_end_s = 5.0` s from the moment of the K.O., then the next round starts straight away with "FIGHT!" (no 3-2-1), or the final screen appears if that round won the match (the text then reads "FINAL RESULTS NEXT"). Nobody can deal damage, and the duck, reload and status text is hidden. |
 | **match over** | A player reached `rounds_to_win = 2` round wins (best of 3; `--rounds-to-win N` changes it). The final screen shows the match winner, per-player rounds won, shots, accuracy, headshots, explosives and damage, and the total time. It stays until `r` starts a rematch (scores and stats reset, countdown begins) or `q` quits. Practice mode has no match end. |
@@ -266,8 +266,8 @@ The game starts at `max_hp = 100`. When a player fires, the weapon is chosen in 
 
 ### 5.5 Powerups
 
-- **When they drop:** only during a live duel. The first one comes 15 s after the duel starts
-  (`powerup_interval_s = 15`), then one every 15 s. A new one never drops while another is still on
+- **When they drop:** only during a live duel. The first one comes 10 s after the duel starts
+  (`powerup_interval_s = 10`), then one every 10 s. A new one never drops while another is still on
   screen.
 - **Type:** a **GRENADE** (green) with chance `grenade_drop_chance = 25%`, otherwise a **ROCKET
   LAUNCHER** (orange). The pickup shows only its sprite, with no text label.
@@ -447,14 +447,14 @@ happens through bombs in practice mode).
 | Ammo | `max_ammo`, `reload_s` | 3, 0.8 s |
 | Camping | `camp_warning_s`, `camp_grace_s`, `camp_drain_fraction`, `camp_drain_interval_s` | 5 s, 7 s, 0.05, 1 s |
 | Damage | `max_hp`, `body_damage`, `head_damage`, `bullet_travel_s` | 100, 10, 25, 0.6 s |
-| Flow | `countdown_s`, `round_end_s`, `come_back_after_s`, `leave_timeout_s`, `mode_switch_hold_s` | 3, 5, 3, 5, 3 s |
+| Flow | `countdown_s`, `round_end_s`, `come_back_after_s`, `leave_timeout_s`, `start_hold_s`, `cancel_hold_s` | 3, 5, 3, 5, 0.5, 3 s |
 | Tracking | `max_match_distance`, `track_gap_s`, `lost_timeout_s` | 0.25 (x W), 0.15 s, 5 s |
 | Face ID | `face_accept`, `face_reject`, `face_margin`, `face_min_samples` | 0.36, 0.2, 0.1, 2 |
 | | `reid_confirm_s`, `verify_confirm_s` | 0.15, 0.3 s |
 | | `enrol_max_samples`, `face_gallery_size`, `face_recent_size` | 90, 24, 12 |
 | Weapon reach | `hand_reach`, `gun_reach`, `rocket_reach`, `grenade_reach` | 0.06, 0.27, 0.38, 0.1 (x H) |
 | Display | `render_hz` | 60 |
-| Powerups | `powerup_interval_s`, `powerup_fall_s`, `powerup_radius`, `powerup_hit_scale`, `powerup_center_spread` | 15 s, 5 s, 0.08, 1.3, 0.05 |
+| Powerups | `powerup_interval_s`, `powerup_fall_s`, `powerup_radius`, `powerup_hit_scale`, `powerup_center_spread` | 10 s, 5 s, 0.08, 1.3, 0.05 |
 | Rocket | `rocket_speed`, `rocket_gravity`, `rocket_blast_radius`, `rocket_damage`, `rocket_min_damage` | 1.6, 1.3, 0.16, 50, 20 |
 | Grenade | `grenade_flight_s`, `grenade_arc`, `grenade_blast_radius`, `grenade_damage`, `grenade_min_damage`, `grenade_drop_chance` | 1.4 s, 0.45, 0.5, 80, 10, 0.25 |
 | Practice | `practice_powerup_interval_s`, `bomb_damage` | 10 s, 25 |

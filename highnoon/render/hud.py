@@ -25,7 +25,6 @@ COUNTDOWN_SIZE = 220
 WAITING_LINES = (("TWO PLAYERS", 110), ("STEP INTO VIEW", 80))
 PRACTICE_WAITING_LINES = (("PRACTICE", 110), ("STEP INTO VIEW", 80))
 COUNTDOWN_COLOR = GOLD
-ENROL_TEXT = "HANDING OUT PLAYER IDS"
 WIN_SUBTITLE = "WINS THE ROUND"
 BLOWN_UP = "BLOWN UP"
 BLOWN_UP_SUBTITLE = "DON'T SHOOT THE BOMBS"
@@ -76,7 +75,6 @@ class Hud:
         for player_id in self.colors:
             for seconds_left in range(6):
                 self._come_back_sprites(player_id, seconds_left, scale)
-        self._enrol_sprite(scale)
         for number in range(1, 6):
             self._countdown_sprite(number, scale)
         self._blown_up_sprite(scale)
@@ -128,8 +126,6 @@ class Hud:
             self._draw_winner(image, game, t, scale)
         if game.mode == "countdown":
             self._draw_countdown(image, game.countdown_left(t), scale)
-            if game.round == 0:
-                self._draw_enrolment(image, t, scale)
         if game.mode == "idle":
             lines = PRACTICE_WAITING_LINES if game.cfg.practice else WAITING_LINES
             self._draw_waiting(image, t, scale, lines)
@@ -197,14 +193,6 @@ class Hud:
         hint = QUIT_HINT if game.forfeited is not None else REMATCH_HINT
         sprite = self.text.get(hint, int(24 * scale), GOLD, HUD_FONT)
         blit_center(image, sprite, width / 2, height - 30 * scale)
-
-    def _enrol_sprite(self, scale: float):
-        return self._announcement_sprite(ENROL_TEXT, 64, CREAM, scale)
-
-    def _draw_enrolment(self, image, t: float, scale: float) -> None:
-        height, width = image.shape[:2]
-        alpha = 1.0 if int(t * 3) % 2 == 0 else 0.7
-        blit_center(image, self._enrol_sprite(scale), width / 2, height * 0.16, alpha)
 
     def _draw_countdown(self, image, seconds_left: float, scale: float) -> None:
         if seconds_left <= 0:

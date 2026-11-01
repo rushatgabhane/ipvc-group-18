@@ -44,6 +44,11 @@ def run(cfg: Config) -> Profiler:
         if cfg.record_video
         else None
     )
+    output_recorder = (
+        guard.call("recorder", SessionRecorder, cfg.record_output, cfg.capture.fps, False)
+        if cfg.record_output
+        else None
+    )
 
     source.start()
     worker.start()
@@ -92,7 +97,7 @@ def run(cfg: Config) -> Profiler:
                     if game.mode == "duel":
                         guard.call("tracking", tracker.lock)
                 if recorder is not None:
-                    guard.call("recorder", recorder.add, frame.image)
+                    guard.call("recorder", recorder.add, frame.image, frame.t_capture)
                 if signal_log is not None:
                     guard.call(
                         "signal_log",
@@ -128,6 +133,8 @@ def run(cfg: Config) -> Profiler:
                     fallback=perception.frame.image,
                 )
 
+            if output_recorder is not None:
+                guard.call("recorder", output_recorder.add, output, time.perf_counter())
             if display is not None:
                 with profiler.stage("display" if fresh is not None else "tween_display"):
                     keys = guard.call("display", display.show, output, renderer.shake)
@@ -165,9 +172,10 @@ def run(cfg: Config) -> Profiler:
         if match_log is not None:
             guard.call("match_log", match_log.close)
             print(f"{match_log.rounds} games appended to {match_log.path}")
-        if recorder is not None:
-            guard.call("recorder", recorder.close)
-            print(f"recorded {recorder.path} ({recorder.dropped} frames dropped)")
+        for rec in (recorder, output_recorder):
+            if rec is not None:
+                guard.call("recorder", rec.close)
+                print(f"recorded {rec.path} ({rec.written} frames, {rec.dropped} dropped)")
         if display is not None:
             guard.call("display", display.close)
         if guard.failures:

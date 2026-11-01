@@ -203,18 +203,25 @@ Live re-test (`session_20261101_1106`, 183 s, 3 games): 5 wrong-face frames in a
 longest 0.1 s, and no IDs handed out after enrolment.
 
 ### 13. Live sessions, two players (1 Nov 2026)
+Whole-session averages from `--metrics-csv` (`tools/task_latency.py`). The summary the game prints at
+exit only covers the last 120 frames, which were idle; an earlier version of this table quoted those
+(30 fps, 41 ms for `1053`) by mistake.
 
 | Session | Length | FPS | Latency mean / p95 | Pose | Face | Face ID | Hands | Render | Dropped |
 |---|---|---|---|---|---|---|---|---|---|
-| `1041` (before face crops) | 105 s | 24.2 | 74.4 / 89.8 ms | 39.1 ms | 15.2 ms | 12.1 ms | 59.5 ms | 3.6 ms | 0.2 fr |
-| `1053` (face crops) | 87 s | 30.0 | 40.9 / 43.3 ms | 26.4 ms | 10.4 ms | 6.9 ms | 19.3 ms | 2.1 ms | 0 |
-| `1106` (identity fix) | 183 s | 24.3 | – | – | – | – | – | – | 0.2 fr |
+| `1041` (whole-frame face search) | 125 s | 25.1 | 70.5 / 87.4 ms | 37.9 ms | 7.8 ms | 3.0 ms | 51.7 ms | 2.2 ms | 0.21 fr |
+| `1053` (head crops) | 86 s | 24.2 | 70.9 / 91.8 ms | 36.9 ms | 21.8 ms | 15.3 ms | 31.3 ms | 3.7 ms | 0.26 fr |
+| `1106` (identity fix) | 181 s | 23.3 | 75.5 / 93.5 ms | 38.7 ms | 22.4 ms | 16.2 ms | 41.6 ms | 4.2 ms | 0.30 fr |
+| `1141` (demo take, also recording game output + raw camera) | 73 s | 25.5 | 64.2 / 89.6 ms | 34.9 ms | 17.0 ms | 11.2 ms | 32.7 ms | 2.1 ms | 0.20 fr |
+| `1143` (aborted take, mostly no faces in view; not a two-player figure) | 54 s | 30.0 | 31.8 / 43.9 ms | 18.2 ms | 3.6 ms | 1.1 ms | 24.3 ms | 1.9 ms | 0.02 fr |
 
-The two-player frame rate varied between sessions (24-30 fps) with the same code, following the hand
-model (19-60 ms) and pose (26-39 ms) times, so the machine's load matters. Hands run asynchronously, so
-a slow hand model raises hand lag (up to 4 frames at p95) rather than dropping frames. These rows
-replace the single-person frame budget at the top as the realistic two-player numbers. The full
-per-module numbers of `1053`, replayed offline, are in section 14.
+With two players the game runs at **23-26 fps with 64-76 ms from capture to screen**, below the
+camera's 30 fps. Pose (37-39 ms) is over the 33 ms budget on its own. Since the head crops find faces,
+face detection plus face ID (22 + 16 = 38 ms, one after the other) is as slow as pose, so both
+inference paths are now critical. The hand model (31-52 ms, asynchronous) competes with both for the
+CPU. Face and face ID were cheap in `1041` only because faces were mostly not found. Writing the demo
+video and the raw camera at the same time (`1141`) did not lower the frame rate. `1143` shows the
+floor without faces to process: 30 fps (camera-bound) and 32 ms latency.
 
 ### 14. Per-task evaluation of a recorded session (`tools/evaluate_clip.py`)
 `session_20261101_1053` (69 s, two players, a third person walking in), replayed frame by frame with
@@ -257,6 +264,43 @@ taped distances (recording protocol, step 5). Known limit: the estimate assumes 
 is off by the same fraction as a player's torso differs (about ±10% between adults), and leaning
 towards the camera makes the torso look shorter and the player look further away.
 
+### 15. Latency per task (`tools/task_latency.py`)
+Stage times from the longest session, `session_20261101_1106` (181 s, two players, 3 games, final
+code). Pose runs on its own thread, face detection and face ID one after the other on the perception
+thread, hands asynchronously on a third, and the game, filtering and rendering on the main thread
+while the next frame is inferred. Stage times therefore do not add up to the latency: inference is
+the slower of the pose and face paths, and latency runs from camera capture to the frame on screen.
+
+| Task | Stage | What it covers | mean ms | p95 ms |
+|---|---|---|---|---|
+| T1 Face tracking & effects | face | face landmarks in head crops | 22.4 | 25.9 |
+| | face_fx | face damage + hat drawing | 2.3 | 4.3 |
+| T2 Pose & motion | pose | pose landmarks + segmentation mask | 38.7 | 41.2 |
+| | hand | hand landmarks, 4 hands (asynchronous) | 41.6 | 63.7 |
+| | postprocess | landmarks to arrays, mask copy | 0.4 | 0.5 |
+| | filter | One Euro filtering (keypoints, aim, face, hat), control signals | 0.4 | 0.7 |
+| T3 Identity | face_id | SFace embedding per face | 16.2 | 20.0 |
+| | tracking | assignment, face verification, re-identification | 0.3 | 0.4 |
+| T4 Game control | game | actions, shots, hits, powerups, rules | 0.3 | 0.5 |
+| T5 Integration & scene | convert | BGR to RGB for the models | 1.0 | 1.6 |
+| | inference | pose and face paths in parallel (the slower one) | 41.3 | 45.8 |
+| | camera | background replacement + wall onto the camera frame | 9.2 | 11.1 |
+| | render | game layer, HUD, effects (includes face_fx) | 4.2 | 6.3 |
+| | display | OpenGL upload + flip | 2.5 | 3.0 |
+| **End to end** | latency | camera capture to frame on screen | **75.5** | **93.5** |
+| | FPS | | **23.3** | |
+
+Dropped frames 0.30 per frame shown; hand results on average 0.9 frames old (p95 3).
+
+Per task, the real-time cost is: T1 25 ms (face 22.4 + effects 2.3), T2 39 ms on the pose thread plus
+the asynchronous hand model, T3 16.5 ms (face ID 16.2 + tracking 0.3), T4 0.3 ms, T5 17 ms on the main
+thread (camera 9.2 + render 4.2 + display 2.5 + convert 1.0). The camera stage (background replacement)
+costs more than the whole render pass and is a candidate for optimisation, along with the face path
+(face ID every frame) and pose.
+
+Reproduce: `python -m highnoon --metrics-csv results/session_metrics.csv`, play, then
+`python tools/task_latency.py results/session_metrics.csv`.
+
 ## Report evaluation checklist
 
 The project description (section 4.2.1) asks every task section of the report for **technical
@@ -269,7 +313,7 @@ cases**, and every task owner to state what does not work reliably (3.2.6). Stat
 | | Jitter raw vs smoothed and the lag it adds (hat) | `evaluate_clip.py` smoothing table | done on recordings |
 | | Effects never switch players | identity tables (T3), section 12 | done |
 | | Behaviour on short face loss | hat filter kept 0.5 s; face crops | done; show in video |
-| | Cost | face 22 ms, face effects 0.5 ms | done |
+| | Cost | face 22 ms, face effects 2.3 ms (section 15) | done |
 | T2 Pose | Pose cost with two people | sections 13-14 | done |
 | | Keypoint jitter raw vs filtered, filter delay | `evaluate_clip.py` smoothing table | done on recordings |
 | | Unreliable keypoints (confidence < 0.5) | `evaluate_clip.py` detection table | done |
@@ -278,10 +322,10 @@ cases**, and every task owner to state what does not work reliably (3.2.6). Stat
 | T3 Identity | Consistency, switches, crossing, occlusion, re-entry | `evaluate_clip.py` identity tables, section 12 | done; add scripted clips |
 | | Thresholds justified by score distributions | `evaluate_clip.py` face match scores | done |
 | | Position in metres and its reliability | `tracking/spatial.py`, `evaluate_clip.py` position table | **measure error at taped 2 m / 3 m** |
-| | Module cost | tracking 0.2 ms, face ID 7-12 ms | done |
+| | Module cost | tracking 0.3 ms, face ID 16 ms (section 15) | done |
 | T4 Game | Action recognition accuracy, cooldowns | `results/games.csv` | **play ~10 games** |
 | | Simultaneous actions, fist-to-shot delay | scripted clip | **to record** |
-| T5 Integration | End-to-end FPS and latency, two players | section 13 | done |
+| T5 Integration | End-to-end FPS and latency, two players; latency per task | sections 13, 15 | done |
 | | Bottlenecks and what was done | sections 1-13 | done |
 | | Module failures handled | `--fail-module hand` / `face` / `tracking` run | **to run and note** |
 | | Glass-to-glass latency | phone slow-motion of the screen | **to measure** |

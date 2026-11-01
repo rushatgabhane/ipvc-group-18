@@ -213,10 +213,10 @@ class Game:
         # does not bounce the screen between "step into view" and the countdown.
         if both_in_view != self._in_view:
             self._in_view, self._in_view_since = both_in_view, t
-        settled = t - self._in_view_since >= self.cfg.mode_switch_hold_s
-        if self.mode == "idle" and both_in_view and settled:
+        held = t - self._in_view_since
+        if self.mode == "idle" and both_in_view and held >= self.cfg.start_hold_s:
             self.mode, self.countdown_end_t = "countdown", t + self.cfg.countdown_s
-        elif self.mode == "countdown" and not both_in_view and settled:
+        elif self.mode == "countdown" and not both_in_view and held >= self.cfg.cancel_hold_s:
             self.mode = "idle"
         elif self.mode == "countdown" and both_in_view and t >= self.countdown_end_t:
             self.reset_round()

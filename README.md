@@ -97,12 +97,12 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 
 - **The game needs two players in view.** With fewer, it waits. When both are in view it counts
   down 3-2-1, and every new round starts with the same countdown. Nobody can shoot during it.
-  Both players have to stay in view for 3 s before the countdown starts, so nothing flickers when
-  someone is briefly missed. If a player is out of view for more than 3 s mid-game, the screen tells
+  The countdown starts half a second after both are in view, and a player has to be gone for 3 s to
+  cancel it, so nothing flickers when someone is briefly missed. If a player is out of view for more than 3 s mid-game, the screen tells
   them to come back; after 5 s more they lose the round (twice in a row loses the match).
 - **Duel.** A body hit costs 10 HP and a headshot 25 (4 headshots or 10 body hits to win). First to 0 loses the round.
   Bullets take 0.45 s to arrive, so you can duck when you see your opponent fire.
-- **Powerups (duel only).** Every 15 s a powerup drops from the top of the screen down the
+- **Powerups (duel only).** Every 10 s a powerup drops from the top of the screen down the
   middle and disappears behind the wall. Whoever shoots it first gets it (lead your shot: it moves):
 
   | Powerup | Effect |
@@ -161,6 +161,10 @@ latency, ready for the plots in the report. `--identity-csv` writes one row per 
 visible, new id, position in pixels and metres, whether a face was seen and how well it matched the
 id's owner, and how many people in view had no id.
 
+**Demo video.** `--record-output clips/demo.mp4` saves the game exactly as shown (with the webcam
+inset) at real speed: when the game runs below 30 fps, frames are repeated so the video never plays
+faster than it happened. `--record` (raw camera, for replays) is paced the same way.
+
 **Report numbers from a recording.** Record a session, then replay it frame by frame:
 
 ```bash
@@ -173,6 +177,10 @@ effects), face and keypoint detection rates, jitter of the shoulders, wrist and 
 with the delay the smoothing adds, identity gaps and how long re-identification took, identity
 switches and consistency (checked against each player's faces from their first seconds), the face
 match score distributions behind the thresholds, and each player's distance in metres.
+
+**Latency per task.** `tools/task_latency.py results/session_metrics.csv` turns a live session's
+`--metrics-csv` into a table of each stage's mean and p95 time grouped by task (T1-T5), with the
+average FPS, dropped frames and capture-to-screen latency.
 
 **Module failures.** `--fail-module NAME[:P]` makes a module fail on purpose (every call, or with
 probability P), e.g. `--fail-module hand` or `--fail-module face:0.3`. Every module runs through
@@ -247,6 +255,7 @@ tools/
   download_models.py   fetch + verify model weights
   analyze_clip.py      replay a clip through the game, log signals + detected actions
   evaluate_clip.py     replay a clip and write the report's evaluation numbers (results/*_eval.md)
+  task_latency.py      per-task (T1-T5) stage latency, FPS and end-to-end latency from --metrics-csv
   record.py            record raw webcam clips for repeatable tests
 tests/                 pytest unit tests
 assets/fonts/          Rye and Bebas Neue (SIL Open Font License, licence files included)
