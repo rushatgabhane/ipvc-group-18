@@ -81,7 +81,7 @@ def step(game, players_fn, frames, t):
 
 def start_duel(players_fn=duel):
     game = Game(GameConfig(), (1280, 720))
-    t = step(game, players_fn, int((game.cfg.mode_switch_hold_s + game.cfg.countdown_s) / DT) + 5, 0.0)
+    t = step(game, players_fn, int((game.cfg.start_hold_s + game.cfg.countdown_s) / DT) + 5, 0.0)
     assert game.mode == "duel"
     return game, t
 
@@ -296,7 +296,7 @@ def test_countdown_starts_only_with_both_players_and_blocks_shooting():
     game = Game(GameConfig(), (1280, 720))
     t = step(game, alone, 10, 0.0)
     assert game.mode == "idle"
-    t = step(game, duel, int(game.cfg.mode_switch_hold_s / DT) - 2, t)
+    t = step(game, duel, int(game.cfg.start_hold_s / DT) - 2, t)
     assert game.mode == "idle", "players must stay in view for a moment before the countdown starts"
     t = step(game, duel, 5, t)
     assert game.mode == "countdown" and game.countdown_left(t) > 2.5
@@ -308,11 +308,11 @@ def test_countdown_starts_only_with_both_players_and_blocks_shooting():
 
 def test_a_player_flickering_out_of_view_does_not_cancel_the_countdown():
     game = Game(GameConfig(), (1280, 720))
-    t = step(game, duel, int(game.cfg.mode_switch_hold_s / DT) + 2, 0.0)
+    t = step(game, duel, int(game.cfg.start_hold_s / DT) + 2, 0.0)
     assert game.mode == "countdown"
     t = step(game, alone, int(1 / DT), t)
     assert game.mode == "countdown"
-    t = step(game, alone, int(game.cfg.mode_switch_hold_s / DT), t)
+    t = step(game, alone, int(game.cfg.cancel_hold_s / DT), t)
     assert game.mode == "idle"
 
 
@@ -392,7 +392,7 @@ def test_in_between_updates_on_the_same_frame_do_not_fire_twice():
 
 def start_practice():
     game = Game(GameConfig(practice=True), (1280, 720))
-    t = step(game, alone, int((game.cfg.mode_switch_hold_s + game.cfg.countdown_s) / DT) + 5, 0.0)
+    t = step(game, alone, int((game.cfg.start_hold_s + game.cfg.countdown_s) / DT) + 5, 0.0)
     assert game.mode == "duel"
     return game, t
 

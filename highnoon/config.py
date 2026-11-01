@@ -93,8 +93,10 @@ class GameConfig:
     # A player has to be gone this long before the "waiting for player" message shows, so a dropped frame
     # or two never flashes it up.
     come_back_after_s: float = 3.0
-    # Players have to be in (or out of) view this long before the game switches between waiting and countdown.
-    mode_switch_hold_s: float = 3.0
+    # Both players have to be in view this long before the countdown starts (short, so the game starts fast),
+    # and out of view this long before a countdown is cancelled (long, so a dropped frame never flickers it).
+    start_hold_s: float = 0.5
+    cancel_hold_s: float = 3.0
     leave_timeout_s: float = 5.0
     powerup_interval_s: float = 10.0
     powerup_fall_s: float = 5.0

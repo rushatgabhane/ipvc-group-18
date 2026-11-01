@@ -21,7 +21,7 @@ player shoots bottles instead of an opponent.
 ## 2. Game flow (`highnoon/game/game.py`)
 
 ```
-idle ──(2 players visible for 3 s)──► countdown (3 s) ──► duel ──(someone hits 0 HP)──► K.O. + winner screen (5 s)
+idle ──(2 players visible for 0.5 s)──► countdown (3 s) ──► duel ──(someone hits 0 HP)──► K.O. + winner screen (5 s)
   ▲                                        │                 │                                  │
   └──(a player lost for 3 s)───────────────┘                 │           countdown (3 s) ◄──────┘
                                                              │
@@ -30,8 +30,8 @@ idle ──(2 players visible for 3 s)──► countdown (3 s) ──► duel �
 
 | Mode | What happens |
 |---|---|
-| **idle** | Fewer than two players are visible. The screen shows "TWO PLAYERS / STEP INTO VIEW". Both players must stay in view for `mode_switch_hold_s = 3.0` s before the countdown starts, so a player flickering in and out of detection does not make the screen flash between the two. |
-| **countdown** | 3-2-1 (`countdown_s = 3.0`). Nobody can fire. The first countdown of the session also shows "HANDING OUT PLAYER IDS" (section 3). If a player is out of view for `mode_switch_hold_s = 3.0` s, the game goes back to idle; a shorter dropout does not cancel the countdown. The duel only starts once both players are in view. When it starts, the round is reset, the announcer says "FIGHT!" (voice and on-screen text). |
+| **idle** | Fewer than two players are visible. The screen shows "TWO PLAYERS / STEP INTO VIEW". Both players must be in view for `start_hold_s = 0.5` s before the countdown starts. |
+| **countdown** | 3-2-1 (`countdown_s = 3.0`). Nobody can fire. If a player is out of view for `cancel_hold_s = 3.0` s, the game goes back to idle; a shorter dropout does not cancel the countdown, so nothing flickers. The duel only starts once both players are in view. When it starts, the round is reset, the announcer says "FIGHT!" (voice and on-screen text). |
 | **duel** | The round is live. Shots, damage, powerups and the camping penalty all apply. The mode only changes if a player stays away long enough to forfeit. |
 | **round over** | Starts when a player's HP reaches 0. "K.O.!" is announced (1.3 s, with voice), then the winner screen ("PLAYER n WINS THE ROUND", "NEXT ROUND IN n") is shown. The whole phase lasts `round_end_s = 5.0` s from the moment of the K.O., then a new countdown begins. Nobody can deal damage, and the duck, reload and status text is hidden. |
 | **forfeit** | A player stayed away too long. The screen dims and shows "PLAYER n: YOU LOSE" for the missing player. No win is scored, bullets, rockets and grenades in flight are removed, and no new round starts. The only way out is to quit and restart the program. |
@@ -441,7 +441,7 @@ happens through bombs in practice mode).
 | Ammo | `max_ammo`, `reload_s` | 3, 0.8 s |
 | Camping | `camp_warning_s`, `camp_grace_s`, `camp_drain_fraction`, `camp_drain_interval_s` | 5 s, 7 s, 0.05, 1 s |
 | Damage | `max_hp`, `body_damage`, `head_damage`, `bullet_travel_s` | 100, 10, 25, 0.6 s |
-| Flow | `countdown_s`, `round_end_s`, `come_back_after_s`, `leave_timeout_s`, `mode_switch_hold_s` | 3, 5, 3, 5, 3 s |
+| Flow | `countdown_s`, `round_end_s`, `come_back_after_s`, `leave_timeout_s`, `start_hold_s`, `cancel_hold_s` | 3, 5, 3, 5, 0.5, 3 s |
 | Tracking | `max_match_distance`, `track_gap_s`, `lost_timeout_s` | 0.25 (x W), 0.15 s, 5 s |
 | Face ID | `face_accept`, `face_reject`, `face_margin`, `face_min_samples` | 0.36, 0.2, 0.1, 2 |
 | | `reid_confirm_s`, `verify_confirm_s` | 0.15, 0.3 s |

@@ -97,8 +97,8 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
 
 - **The game needs two players in view.** With fewer, it waits. When both are in view it counts
   down 3-2-1, and every new round starts with the same countdown. Nobody can shoot during it.
-  Both players have to stay in view for 3 s before the countdown starts, so nothing flickers when
-  someone is briefly missed. If a player is out of view for more than 3 s mid-game, the screen tells
+  The countdown starts half a second after both are in view, and a player has to be gone for 3 s to
+  cancel it, so nothing flickers when someone is briefly missed. If a player is out of view for more than 3 s mid-game, the screen tells
   them to come back; after 5 s more they forfeit.
 - **Duel.** A body hit costs 10 HP and a headshot 25 (4 headshots or 10 body hits to win). First to 0 loses the round.
   Bullets take 0.45 s to arrive, so you can duck when you see your opponent fire.
