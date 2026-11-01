@@ -129,6 +129,7 @@ class DisplayConfig:
     sound: bool = True
     render_hz: int = 60
     background: bool = True
+    demo_timer: bool = False  # counts 0 to 60 s on screen while recording the peer video
 
 
 @dataclass
