@@ -212,12 +212,16 @@ exit only covers the last 120 frames, which were idle; an earlier version of thi
 | `1041` (whole-frame face search) | 125 s | 25.1 | 70.5 / 87.4 ms | 37.9 ms | 7.8 ms | 3.0 ms | 51.7 ms | 2.2 ms | 0.21 fr |
 | `1053` (head crops) | 86 s | 24.2 | 70.9 / 91.8 ms | 36.9 ms | 21.8 ms | 15.3 ms | 31.3 ms | 3.7 ms | 0.26 fr |
 | `1106` (identity fix) | 181 s | 23.3 | 75.5 / 93.5 ms | 38.7 ms | 22.4 ms | 16.2 ms | 41.6 ms | 4.2 ms | 0.30 fr |
+| `1141` (demo take, also recording game output + raw camera) | 73 s | 25.5 | 64.2 / 89.6 ms | 34.9 ms | 17.0 ms | 11.2 ms | 32.7 ms | 2.1 ms | 0.20 fr |
+| `1143` (aborted take, mostly no faces in view; not a two-player figure) | 54 s | 30.0 | 31.8 / 43.9 ms | 18.2 ms | 3.6 ms | 1.1 ms | 24.3 ms | 1.9 ms | 0.02 fr |
 
-With two players the game runs at **23-25 fps with 71-76 ms from capture to screen**, below the
+With two players the game runs at **23-26 fps with 64-76 ms from capture to screen**, below the
 camera's 30 fps. Pose (37-39 ms) is over the 33 ms budget on its own. Since the head crops find faces,
 face detection plus face ID (22 + 16 = 38 ms, one after the other) is as slow as pose, so both
 inference paths are now critical. The hand model (31-52 ms, asynchronous) competes with both for the
-CPU. Face and face ID were cheap in `1041` only because faces were mostly not found.
+CPU. Face and face ID were cheap in `1041` only because faces were mostly not found. Writing the demo
+video and the raw camera at the same time (`1141`) did not lower the frame rate. `1143` shows the
+floor without faces to process: 30 fps (camera-bound) and 32 ms latency.
 
 ### 14. Per-task evaluation of a recorded session (`tools/evaluate_clip.py`)
 `session_20261101_1053` (69 s, two players, a third person walking in), replayed frame by frame with
