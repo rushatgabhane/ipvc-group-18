@@ -75,15 +75,15 @@ class Renderer:
         above_wall = image[: self.scenery.wall_top]
         for player in players:
             if player.visible and player.face is not None:
+                face = player.face
+                if player.face_smoothed is not None:
+                    points = player.face_smoothed
+                    face = FaceObservation(points, np.concatenate([points.min(axis=0), points.max(axis=0)]))
                 state = game.states.get(player.id)
                 if state is not None:
                     hp_fraction = state.hp / game.cfg.max_hp
-                    face = player.face
-                    if player.face_smoothed is not None:
-                        face = FaceObservation(player.face_smoothed, face.bbox)
                     draw_face_damage(above_wall, face, player.id, hp_fraction, t - state.last_hit_t)
-                color = PLAYER_COLORS.get(player.id, WHITE)
-                self.face_fx.draw(above_wall, player.face, player.id, color)
+                self.face_fx.draw(above_wall, face, PLAYER_COLORS.get(player.id, WHITE))
 
         self.fx.update(t, game.effects)
         self.world.draw(image, game, t, dt)

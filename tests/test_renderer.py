@@ -19,12 +19,12 @@ WALL_TOP = int(HEIGHT * (1 - GameConfig().cover_height))
 def make_face(top: float) -> FaceObservation:
     landmarks = np.zeros((478, 2), np.float32)
     landmarks[:468] = UV * 200 + (540, top)
-    landmarks[468], landmarks[473] = landmarks[33], landmarks[263]
+    landmarks[468:473], landmarks[473:] = landmarks[33], landmarks[263]
     points = landmarks[:468]
     return FaceObservation(landmarks, np.concatenate([points.min(axis=0), points.max(axis=0)]))
 
 
-def picture(face: FaceObservation | None) -> np.ndarray:
+def picture(face: FaceObservation | None, smoothed: np.ndarray | None = None) -> np.ndarray:
     cfg = GameConfig()
     game = Game(cfg, (WIDTH, HEIGHT))
     game.states[1] = PlayerState(PlayerActions(cfg), 10, cfg.max_ammo, last_hit_t=-math.inf)
@@ -32,11 +32,16 @@ def picture(face: FaceObservation | None) -> np.ndarray:
     renderer.world.draw = renderer.hud.draw = lambda *args: None  # only the face effects are under test
     image = np.full((HEIGHT, WIDTH, 3), 128, np.uint8)
     perception = Perception(Frame(0, image, 0.0, 0), [], [], None, 0.0)
-    return renderer.render(perception, [Player(id=1, face=face, visible=True)], game, None)
+    return renderer.render(perception, [Player(id=1, face=face, face_smoothed=smoothed, visible=True)], game, None)
 
 
 def test_a_face_above_the_wall_gets_its_effects():
     assert np.any(picture(make_face(WALL_TOP - 300.0)) != picture(None))
+
+
+def test_all_face_effects_follow_the_smoothed_face():
+    raw, smoothed = make_face(WALL_TOP - 300.0), make_face(WALL_TOP - 260.0)
+    assert np.array_equal(picture(raw, smoothed.landmarks), picture(smoothed))
 
 
 def hat_rise() -> int:

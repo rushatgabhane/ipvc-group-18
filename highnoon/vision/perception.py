@@ -12,7 +12,8 @@ from mediapipe.tasks.python import BaseOptions, vision
 from highnoon.config import PerceptionConfig
 from highnoon.contracts import FaceObservation, Frame, HandObservation, Perception, PoseObservation
 from highnoon.core.capture import FrameSource
-from highnoon.vision.delegate import resolve_delegate
+from highnoon.core.guard import ModuleGuard
+from highnoon.vision.delegate import create_with_fallback, resolve_delegate
 from highnoon.vision.face_id import FaceEmbedder
 
 FINGERTIPS = [8, 12, 16, 20]
@@ -20,16 +21,19 @@ WRIST, MIDDLE_KNUCKLE = 0, 9
 
 
 class Perceiver:
-    def __init__(self, cfg: PerceptionConfig):
+    def __init__(self, cfg: PerceptionConfig, guard: ModuleGuard | None = None):
         self.cfg = cfg
+        self.guard = guard or ModuleGuard()
         for path in (cfg.pose_model_path, cfg.face_model_path, cfg.hand_model_path, cfg.face_id_model_path):
             if not path.exists():
-                raise FileNotFoundError(f"{path} missing - run: python tools/download_models.py")
+                print(f"[highnoon] {path} missing - run: python tools/download_models.py")
         delegate = resolve_delegate(cfg)
-        self.pose = create_pose_landmarker(cfg, delegate)
-        self.face = create_face_landmarker(cfg, delegate)
-        self.hands = HandWorker(create_hand_landmarker(cfg, delegate))
-        self.face_id = FaceEmbedder(cfg.face_id_model_path)
+        guard = self.guard
+        self.pose = guard.call("pose", create_with_fallback, create_pose_landmarker, cfg, delegate, "pose")
+        self.face = guard.call("face", create_with_fallback, create_face_landmarker, cfg, delegate, "face")
+        hand = guard.call("hand", create_with_fallback, create_hand_landmarker, cfg, delegate, "hand")
+        self.hands = HandWorker(hand, guard) if hand is not None else None
+        self.face_id = guard.call("face_id", FaceEmbedder, cfg.face_id_model_path)
         self._pose_thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pose")
 
     def __call__(self, frame: Frame) -> Perception:
@@ -37,11 +41,14 @@ class Perceiver:
         t0 = time.perf_counter()
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(frame.image, cv2.COLOR_BGR2RGB))
         timings["convert"] = elapsed_ms(t0)
-        self.hands.submit(frame, image)
+        if self.hands is not None:
+            self.hands.submit(frame, image)
 
         def detect(name, landmarker):
             started = time.perf_counter()
-            result = landmarker.detect_for_video(image, frame.timestamp_ms)
+            result = None
+            if landmarker is not None:
+                result = self.guard.call(name, landmarker.detect_for_video, image, frame.timestamp_ms)
             timings[name] = elapsed_ms(started)
             return result
 
@@ -49,28 +56,34 @@ class Perceiver:
         pose_future = self._pose_thread.submit(detect, "pose", self.pose)
         face_result = detect("face", self.face)
         width, height = frame.size
-        faces = convert_faces(face_result, width, height)
-        if frame.id % self.cfg.face_id_every == 0:
+        faces = []
+        if face_result is not None:
+            faces = self.guard.call("face", convert_faces, face_result, width, height, fallback=[])
+        if self.face_id is not None and frame.id % self.cfg.face_id_every == 0:
             started = time.perf_counter()
             for face in faces:
-                face.embedding = self.face_id(frame.image, face)
+                face.embedding = self.guard.call("face_id", self.face_id, frame.image, face)
             timings["face_id"] = elapsed_ms(started)
         pose_result = pose_future.result()
         timings["inference"] = elapsed_ms(t_infer)
 
         t_post = time.perf_counter()
-        poses = convert_poses(pose_result, width, height)
-        mask = merge_person_masks(pose_result)
-        hands, timings["hand"] = self.hands.latest()
+        poses, mask = [], None
+        if pose_result is not None:
+            poses = self.guard.call("pose", convert_poses, pose_result, width, height, fallback=[])
+            mask = self.guard.call("pose", merge_person_masks, pose_result)
+        hands, timings["hand"] = self.hands.latest() if self.hands is not None else ([], 0.0)
         timings["hand_lag"] = float(frame.id - hands[0].frame_id) if hands else 0.0
         timings["postprocess"] = elapsed_ms(t_post)
         return Perception(frame, poses, faces, mask, time.perf_counter(), timings, hands)
 
     def close(self) -> None:
         self._pose_thread.shutdown(wait=True)
-        self.hands.close()
-        self.pose.close()
-        self.face.close()
+        if self.hands is not None:
+            self.guard.call("hand", self.hands.close)
+        for name, landmarker in (("pose", self.pose), ("face", self.face)):
+            if landmarker is not None:
+                self.guard.call(name, landmarker.close)
 
 
 def elapsed_ms(start: float) -> float:
@@ -122,8 +135,9 @@ def create_hand_landmarker(cfg: PerceptionConfig, delegate):
 
 
 class HandWorker:
-    def __init__(self, landmarker):
+    def __init__(self, landmarker, guard: ModuleGuard):
         self.landmarker = landmarker
+        self.guard = guard
         self._pending: tuple[Frame, mp.Image] | None = None
         self._result: list[HandObservation] = []
         self._ms = 0.0
@@ -150,11 +164,14 @@ class HandWorker:
                 frame, image = self._pending
                 self._pending = None
             started = time.perf_counter()
-            result = self.landmarker.detect_for_video(image, frame.timestamp_ms)
-            hands = convert_hands(result, *frame.size, frame.id)
+            hands = self.guard.call("hand", self._detect, frame, image, fallback=[])
             with self._cond:
                 self._result = hands
                 self._ms = elapsed_ms(started)
+
+    def _detect(self, frame: Frame, image: mp.Image) -> list[HandObservation]:
+        result = self.landmarker.detect_for_video(image, frame.timestamp_ms)
+        return convert_hands(result, *frame.size, frame.id)
 
     def close(self) -> None:
         with self._cond:
@@ -189,7 +206,12 @@ class PerceptionWorker:
                         break
                     continue
                 last_id = frame.id
-                result = self.perceiver(frame)
+                result = self.perceiver.guard.call(
+                    "perception",
+                    self.perceiver,
+                    frame,
+                    fallback=Perception(frame, [], [], None, time.perf_counter()),
+                )
                 with self._cond:
                     self._latest = result
                     self._cond.notify_all()

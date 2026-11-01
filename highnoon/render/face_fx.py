@@ -4,13 +4,18 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+# Whole eye outlines: averaging them is far steadier than the single corner landmarks.
+LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+RIGHT_EYE = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466]
+FOREHEAD, CHIN = 10, 152
+HAT_LIFT = 0.69  # eye centre to hat centre, in face heights: unlike eye spacing it survives turning the head
+HAT_WIDTH = 1.5
+
 
 class FaceEffectRenderer:
 
     def __init__(self, alpha: float = 0.9):
 
-        self.smoothed_angles = {}
-        self.smoothing = 0.85
         self.alpha = float(np.clip(alpha, 0.0, 1.0))
 
         hat_path = Path(__file__).resolve().parents[2] / "assets" / "sprites" / "cowboy_hat.png"
@@ -22,32 +27,16 @@ class FaceEffectRenderer:
         if self.hat.ndim != 3 or self.hat.shape[2] != 4:
             raise ValueError("Cowboy hat PNG must have an alpha channel")
 
-    @staticmethod
-    def rotate_hat(
-                hat: np.ndarray,
-                angle: float) -> np.ndarray: 
-        h, w = hat.shape[:2]
-        center = (w//2, h//2)
+        # warpAffine aliases when shrinking by more than half, so it starts from a suitable size.
+        self.sprites = [self.hat]
+        while min(self.sprites[-1].shape[:2]) > 32:
+            sprite = self.sprites[-1]
+            size = (sprite.shape[1] // 2, sprite.shape[0] // 2)
+            self.sprites.append(cv2.resize(sprite, size, interpolation=cv2.INTER_AREA))
 
-        matrix = cv2.getRotationMatrix2D(center, np.degrees(angle), 1.0)
-
-        cos = abs(matrix[0,0])
-        sin = abs(matrix[0,1])
-        new_w = int(h * sin + w * cos)
-        new_h = int(h * cos + w * sin)
-
-        matrix[0, 2] += new_w /2 - center[0]
-        matrix[1, 2] += new_h /2 - center[1]
-
-        return cv2.warpAffine(hat, matrix, (new_w, new_h),
-                              flags = cv2.INTER_LINEAR,
-                              borderMode = cv2.BORDER_CONSTANT,
-                              borderValue = (0,0,0,0))
-
-
-    def draw(self, image: np.darray, face, player_id: int,
+    def draw(self, image: np.darray, face,
              color=None) -> np.darray:
-        
+
         points = np.asarray(face.landmarks, dtype = np.float32)
         x1, y1, x2, y2 = np.asarray(face.bbox).reshape(-1)[:4]
         face_width = float(x2-x1)
@@ -56,82 +45,53 @@ class FaceEffectRenderer:
         if face_width < 4 or face_height < 4:
             return image
 
-        previous_angle = self.smoothed_angles.get(player_id, 0.0)
-        angle = previous_angle
+        angle = 0.0
 
-        if len(points) > 263:
-            left_eye, right_eye = points[33], points[263] #mediapipe eyes iris center landmarks
+        if len(points) > max(LEFT_EYE + RIGHT_EYE + [FOREHEAD, CHIN]):
+            left_eye = points[LEFT_EYE, :2].mean(axis=0)
+            right_eye = points[RIGHT_EYE, :2].mean(axis=0)
 
-            detected_angle = float(np.arctan2(
+            angle = float(np.arctan2(
                 right_eye[1] - left_eye[1],
                 right_eye[0] - left_eye[0]
             ))
 
-            previous_angle = self.smoothed_angles.get(player_id, detected_angle)
-
-            delta = np.arctan2(
-                np.sin(detected_angle - previous_angle),
-                np.cos(detected_angle - previous_angle)
-            )
-
-            angle = (previous_angle + (1 - self.smoothing) * delta)
-
-            self.smoothed_angles[player_id] = angle
-
             eye_center = (left_eye + right_eye) / 2
-            eye_distance = np.linalg.norm(right_eye - left_eye)
+            lift = HAT_LIFT * float(np.linalg.norm(points[CHIN, :2] - points[FOREHEAD, :2]))
 
-            offset_x = 0
-            offset_y = -eye_distance * 1.3
-
-            cos_a = np.cos(angle)
-            sin_a = np.sin(angle)
-
-            rotated_offset_x = offset_x * cos_a - offset_y * sin_a
-            rotated_offset_y = offset_x * sin_a + offset_y * cos_a
-
-            center_x = int(eye_center[0] + rotated_offset_x)
-            center_y = int(eye_center[1] + rotated_offset_y)
+            center_x = float(eye_center[0] + lift * np.sin(angle))
+            center_y = float(eye_center[1] - lift * np.cos(angle))
 
         else:
-            center_x = int((x1 + x2) / 2)
-            center_y = int(y1 - face_height * 0.35)
+            center_x = float((x1 + x2) / 2)
+            center_y = float(y1 - face_height * 0.35)
 
-        original_h, original_w = self.hat.shape[:2]
+        target_width = face_width * HAT_WIDTH
+        sprite = next((s for s in reversed(self.sprites) if s.shape[1] >= target_width), self.hat)
+        h, w = sprite.shape[:2]
+        scale = target_width / w
 
-        target_width = int(face_width * 1.5)
-        scale = target_width / original_w
+        matrix = cv2.getRotationMatrix2D((w / 2, h / 2), np.degrees(-angle), scale)
+        matrix[0, 2] += center_x - w / 2
+        matrix[1, 2] += center_y - h / 2
 
-        target_height = max(1, int(original_h * scale))
+        corners = matrix @ np.array([[0, 0, 1], [w, 0, 1], [0, h, 1], [w, h, 1]], np.float64).T
 
-        hat = cv2.resize(self.hat,
-                         (target_width, target_height),
-                         interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR)
-
-        hat = self.rotate_hat(hat, -angle)
-
-
-        h, w = hat.shape[:2]
-
-        x_start = center_x  - w // 2
-        y_start = center_y - h // 2
-
-        x0 = max(0, x_start)
-        y0 = max(0, y_start)
-        x_end = min(image.shape[1], x_start + w)
-        y_end = min(image.shape[0], y_start + h)
+        x0 = max(0, int(np.floor(corners[0].min())))
+        y0 = max(0, int(np.floor(corners[1].min())))
+        x_end = min(image.shape[1], int(np.ceil(corners[0].max())) + 1)
+        y_end = min(image.shape[0], int(np.ceil(corners[1].max())) + 1)
 
         if x0 >= x_end or y0 >= y_end:
             return image
 
-        hat_x0 = x0 - x_start
-        hat_y0 = y0 - y_start
+        matrix[0, 2] -= x0
+        matrix[1, 2] -= y0
+        hat_crop = cv2.warpAffine(sprite, matrix, (x_end - x0, y_end - y0),
+                                  flags = cv2.INTER_LINEAR,
+                                  borderMode = cv2.BORDER_CONSTANT,
+                                  borderValue = (0,0,0,0))
 
-        hat_x1 = hat_x0 + (x_end - x0)
-        hat_y1 = hat_y0 + (y_end - y0)
-
-        hat_crop = hat[hat_y0:hat_y1, hat_x0:hat_x1]
-        
         rgb = hat_crop[:, :, :3].astype(np.float32)
         alpha = hat_crop[:, :, 3:4].astype(np.float32) / 255
         alpha *= self.alpha

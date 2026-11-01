@@ -34,13 +34,22 @@ print("GPU_OK")
 def resolve_delegate(cfg: PerceptionConfig) -> BaseOptions.Delegate:
     if cfg.delegate == "cpu":
         return BaseOptions.Delegate.CPU
-    if cfg.delegate == "gpu":
-        return BaseOptions.Delegate.GPU
-    if platform.system() not in GPU_PLATFORMS:
+    if cfg.delegate == "auto" and platform.system() not in GPU_PLATFORMS:
         return BaseOptions.Delegate.CPU
     ok = gpu_available(cfg)
     print(f"[highnoon] inference on {'GPU' if ok else 'CPU (GPU probe failed)'}; override with --delegate")
     return BaseOptions.Delegate.GPU if ok else BaseOptions.Delegate.CPU
+
+
+def create_with_fallback(create, cfg: PerceptionConfig, delegate, name: str):
+    try:
+        return create(cfg, delegate)
+    except Exception as error:
+        if delegate == BaseOptions.Delegate.CPU:
+            raise
+        reason = str(error).strip().splitlines()[-1] if str(error).strip() else type(error).__name__
+        print(f"[highnoon] {name} failed on GPU ({reason}); using CPU")
+        return create(cfg, BaseOptions.Delegate.CPU)
 
 
 def gpu_available(cfg: PerceptionConfig) -> bool:
@@ -62,9 +71,14 @@ def probe_gpu(model_paths: list[str]) -> bool:
             text=True,
             timeout=120,
         )
-    except (subprocess.TimeoutExpired, OSError):
+    except (subprocess.TimeoutExpired, OSError) as error:
+        print(f"[highnoon] GPU probe could not run: {error}")
         return False
-    return result.returncode == 0 and "GPU_OK" in result.stdout
+    if result.returncode == 0 and "GPU_OK" in result.stdout:
+        return True
+    lines = [line for line in result.stderr.strip().splitlines() if "clearcut" not in line.lower()]
+    print(f"[highnoon] GPU probe failed (exit {result.returncode}): {lines[-1] if lines else 'no error output'}")
+    return False
 
 
 def read_cache() -> dict:

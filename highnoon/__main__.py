@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from highnoon.app import run
@@ -60,8 +61,14 @@ def parse_args() -> Config:
 
 
 def main() -> None:
-    profiler = run(parse_args())
-    print("\n" + profiler.summary())
+    cfg = parse_args()
+    try:
+        profiler = run(cfg)
+        print("\n" + profiler.summary())
+    except Exception as error:
+        cause = error.__cause__ or error
+        print(f"[highnoon] cannot continue: {type(cause).__name__}: {cause}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -55,7 +55,11 @@ class CameraSource(FrameSource):
         frame_id = 0
         last_timestamp = -1
         while self._running:
-            ok, image = self.cap.read()
+            try:
+                ok, image = self.cap.read()
+            except cv2.error as error:
+                print(f"[highnoon] camera read failed: {error}", flush=True)
+                ok, image = False, None
             t = time.perf_counter()
             if not ok:
                 with self._cond:
