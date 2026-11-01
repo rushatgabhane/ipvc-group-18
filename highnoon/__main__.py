@@ -35,6 +35,12 @@ def parse_args() -> Config:
     parser.add_argument("--record", type=Path, help="save the raw camera video of the session (for replay)")
     parser.add_argument("--max-frames", type=int, help="stop after N frames")
     parser.add_argument(
+        "--rounds-to-win",
+        type=int,
+        default=2,
+        help="round wins that end the match (default 2, best of 3); use a large value for long benchmarks",
+    )
+    parser.add_argument(
         "--practice", action="store_true", help="single-player target practice: shoot bottles, no duel"
     )
     parser.add_argument(
@@ -67,6 +73,7 @@ def parse_args() -> Config:
     cfg.filters.camera_hfov_deg = args.hfov
     cfg.identity_csv = args.identity_csv
     cfg.game.practice = args.practice
+    cfg.game.rounds_to_win = args.rounds_to_win
     if args.practice:
         cfg.games_csv = None
         cfg.perception.max_players = 1

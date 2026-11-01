@@ -43,6 +43,8 @@ from highnoon.vision.head import measure_head
 from highnoon.vision.motion import L_SHOULDER, R_SHOULDER, R_WRIST, MotionFilter
 from highnoon.vision.perception import Perceiver
 
+NO_MATCH_END = 10**9
+
 TIMED = ("pose", "face", "face_id", "hand", "inference", "postprocess", "tracking", "filter", "face_fx")
 JUMP_PER_WIDTH = 0.15  # one frame; nobody crosses 15% of the picture in 33 ms
 SWITCH_MIN_S = 0.3  # shorter disagreements are single bad face crops, not a swapped id
@@ -61,6 +63,7 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = Config()
+    cfg.game.rounds_to_win = NO_MATCH_END
     cfg.capture.source = str(args.clip)
     cfg.capture.realtime = False
     cfg.filters.camera_hfov_deg = args.hfov

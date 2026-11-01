@@ -47,6 +47,6 @@ class SoundBoard:
         if game.mode == "duel" and self._mode == "countdown":
             self._sources["fight"].play()
         round_over = game.round_over_t is not None
-        if round_over and not self._round_over:
+        if round_over and not self._round_over and game.walked_out is None:
             self._sources["ko"].play()
         self._mode, self._round_over = game.mode, round_over

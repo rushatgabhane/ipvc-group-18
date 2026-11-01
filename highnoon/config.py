@@ -88,6 +88,7 @@ class GameConfig:
     gun_reach: float = 0.27
     rocket_reach: float = 0.38
     grenade_reach: float = 0.1
+    rounds_to_win: int = 2
     round_end_s: float = 5.0
     countdown_s: float = 3.0
     # A player has to be gone this long before the "waiting for player" message shows, so a dropped frame

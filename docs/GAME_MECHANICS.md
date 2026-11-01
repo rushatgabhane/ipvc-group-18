@@ -31,20 +31,27 @@ idle ──(2 players visible for 3 s)──► countdown (3 s) ──► duel �
 | Mode | What happens |
 |---|---|
 | **idle** | Fewer than two players are visible. The screen shows "TWO PLAYERS / STEP INTO VIEW". Both players must stay in view for `mode_switch_hold_s = 3.0` s before the countdown starts, so a player flickering in and out of detection does not make the screen flash between the two. |
-| **countdown** | 3-2-1 (`countdown_s = 3.0`). Nobody can fire. The first countdown of the session also shows "HANDING OUT PLAYER IDS" (section 3). If a player is out of view for `mode_switch_hold_s = 3.0` s, the game goes back to idle; a shorter dropout does not cancel the countdown. The duel only starts once both players are in view. When it starts, the round is reset, the announcer says "FIGHT!" (voice and on-screen text). |
+| **countdown** | 3-2-1 (`countdown_s = 3.0`), before the first round of a session and before a rematch. Nobody can fire. The first countdown of the session also shows "HANDING OUT PLAYER IDS" (section 3). If a player is out of view for `mode_switch_hold_s = 3.0` s, the game goes back to idle; a shorter dropout does not cancel the countdown. The duel only starts once both players are in view. When it starts, the round is reset, the announcer says "FIGHT!" (voice and on-screen text). |
 | **duel** | The round is live. Shots, damage, powerups and the camping penalty all apply. The mode only changes if a player stays away long enough to forfeit. |
-| **round over** | Starts when a player's HP reaches 0. "K.O.!" is announced (1.3 s, with voice), then the winner screen ("PLAYER n WINS THE ROUND", "NEXT ROUND IN n") is shown. The whole phase lasts `round_end_s = 5.0` s from the moment of the K.O., then a new countdown begins. Nobody can deal damage, and the duck, reload and status text is hidden. |
-| **forfeit** | A player stayed away too long. The screen dims and shows "PLAYER n: YOU LOSE" for the missing player. No win is scored, bullets, rockets and grenades in flight are removed, and no new round starts. The only way out is to quit and restart the program. |
+| **round over** | Starts when a player's HP reaches 0. "K.O.!" is announced (1.3 s, with voice), then the winner screen ("PLAYER n WINS THE ROUND", "NEXT ROUND IN n") is shown. The whole phase lasts `round_end_s = 5.0` s from the moment of the K.O., then the next round starts straight away with "FIGHT!" (no 3-2-1), or the final screen appears if that round won the match (the text then reads "FINAL RESULTS NEXT"). Nobody can deal damage, and the duck, reload and status text is hidden. |
+| **match over** | A player reached `rounds_to_win = 2` round wins (best of 3; `--rounds-to-win N` changes it). The final screen shows the match winner, per-player rounds won, shots, accuracy, headshots, explosives and damage, and the total time. It stays until `r` starts a rematch (scores and stats reset, countdown begins) or `q` quits. Practice mode has no match end. |
+| **forfeit** | The same player ran out the leave timer in two rounds back to back. The other player wins the match and the final screen shows "WINS BY FORFEIT" with the stats so far. No new round starts. The only way out is to quit and restart the program. |
 
 - **A player who leaves during a duel:** nothing is paused. Once they have been out of view for more
   than `come_back_after_s = 3.0` s (long enough that a dropped frame never flashes it up),
-  "P*n*: WAITING FOR PLAYER ID" and "GAME ENDS IN n s" appear in their colour. If they have no ID
-  again `leave_timeout_s = 5.0` s after that (8 s in total), they forfeit. The other player can still move and fire meanwhile. The message disappears once they are
-  recognised (section 3). The same timer runs during the winner screen, where the message is hidden.
+  "P*n*: WAITING FOR PLAYER ID" and "ROUND ENDS IN n s" appear in their colour. If they have no ID
+  again `leave_timeout_s = 5.0` s after that (8 s in total), the round ends and the other player gets
+  the point. The other player can still move and fire meanwhile. The message disappears once they are
+  recognised (section 3). The timer does not run during the winner screen.
+- **After a walkout:** the next round starts even if the player is still gone, with a fresh timer. If
+  the same player runs it out again in that next round, the match ends as a forfeit. A round that ends
+  in a K.O. clears this.
 - **Round reset:** HP goes back to 100 and ammo to 3. Rockets, grenades, bullets in flight and the
   falling powerup are all removed. Scores are kept.
-- **`r` key:** resets the round immediately without changing the mode. It does not leave the forfeit
-  screen.
+- **`r` key:** resets the round immediately without changing the mode, or starts a rematch on the
+  match over screen. It does not leave the forfeit screen.
+- **Self-inflicted K.O.:** in a duel, killing yourself with a bomb gives the opponent the round. In
+  practice mode there is no winner.
 
 ## 3. Players and identity (`highnoon/tracking/identity.py`)
 
@@ -312,9 +319,8 @@ Keys: `q`/`esc` quit, `r` restart the round, `d` debug overlay, `b` toggle the b
 ## 6a. Evaluation log (`highnoon/core/match_log.py`)
 
 One row is appended to `results/games.csv` (`--games-csv PATH`, or `--no-games-csv` to disable) when
-a round ends in a K.O. with a winner, or when the program quits during an unfinished round. A forfeit
-has no row of its own: it is logged as `quit` when the program closes, with a duration that runs until
-then. Each row has the result,
+a round ends in a K.O. with a winner (`ko`), when a player runs out the leave timer (`left`), or when
+the program quits during an unfinished round (`quit`). Each row has the result,
 winner, duration, fps, latency/inference/render timings (mean and p95), and per-player stats: shots,
 bullet hits, headshots, accuracy, rockets, grenades, damage dealt, camping damage taken, blocked
 shots, powerups, reloads, dry fires, ducks, time ducked, time aiming, the share of aiming time with a
@@ -469,9 +475,9 @@ These follow from the code but are easy to miss:
 - **The reload is free.** Ducking refills the magazine even when it is not empty.
 - **No hit-check at the trigger.** Whether a bullet hits is decided only when it arrives. Aiming at
   the target when you fire does not guarantee a hit.
-- **Leaving does not pause the game.** The round keeps running, and a player away for 6 s loses the
-  whole game. That also applies during the winner screen, and it ends the session: only restarting the
-  program gets out of the forfeit screen.
+- **Leaving does not pause the game.** The round keeps running, and a player away for 8 s loses the
+  round. Doing that in two rounds back to back loses the match and ends the session: only restarting
+  the program gets out of the forfeit screen.
 - **Players are fixed for the session.** After the first duel starts, new people cannot join. Playing
   with someone else means restarting the program.
 - **Hiding your face can cost you the game.** A player who returns with their face hidden or turned

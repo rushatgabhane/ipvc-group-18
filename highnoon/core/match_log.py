@@ -81,7 +81,7 @@ class MatchLog:
                 if name in timings:
                     self._timings.setdefault(name, []).append(timings[name])
             if game.winner is not None and not self._had_winner:
-                self._finish(t, "ko", game.winner)
+                self._finish(t, "left" if game.walked_out is not None else "ko", game.winner)
         self._had_winner = game.winner is not None
         self._last_t = t
 
@@ -152,7 +152,7 @@ def count_effect(tallies: dict[int, PlayerTally], effect) -> None:
     counts = tallies[effect.player].counts
     if effect.kind == "muzzle":
         counts[{"rocket": "rockets", "grenade": "grenades"}.get(effect.detail, "shots")] += 1
-    elif effect.kind in ("hit", "headshot"):
+    elif effect.kind in ("hit", "headshot") and effect.detail != "bomb":
         counts["damage_dealt"] += effect.amount
         counts["bullet_hits"] += effect.detail == "bullet"
         counts["headshots"] += effect.kind == "headshot"

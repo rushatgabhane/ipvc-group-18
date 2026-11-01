@@ -368,7 +368,101 @@ def test_player_who_stays_away_forfeits_after_the_countdown():
         return [make_player(1, 300), Player(id=2, last_seen=left_at)]
 
     step(game, p2_gone, int((game.cfg.come_back_after_s + game.cfg.leave_timeout_s) / DT) + 3, t)
+    assert game.mode == "duel" and game.forfeited is None
+    assert game.round_over_t is not None and game.walked_out == 2
+    assert game.winner == 1 and game.scores == {1: 1}
+
+
+def knock_out(game, winner, loser, t):
+    game._damage(winner, loser, game.cfg.max_hp, "hit", np.zeros(2, np.float32), t, "bullet")
+    return step(game, duel, int(game.cfg.round_end_s / DT) + 2, t)
+
+
+def test_second_round_win_ends_the_match_and_rematch_clears_it():
+    game, t = start_duel()
+    t = knock_out(game, 1, 2, t)
+    t = step(game, duel, 2, t)
+    assert game.round_live and game.match_winner is None and game.countdown_left(t) == 0
+    t = knock_out(game, 1, 2, t)
+    assert game.mode == "match_over" and game.match_winner == 1
+    assert game.match_summary()[0] == ("ROUNDS WON", "2", "0")
+    assert game.match_summary()[5] == ("DAMAGE DEALT", str(2 * game.cfg.max_hp), "0")
+    t = step(game, duel, 300, t)
+    assert game.mode == "match_over" and not game.round_live
+    game.new_match()
+    assert game.mode == "countdown" and game.scores == {} and game.match_winner is None
+    assert game.match_summary()[5] == ("DAMAGE DEALT", "0", "0")
+    assert game.states[2].hp == game.cfg.max_hp
+
+
+def test_one_win_each_goes_to_a_deciding_round():
+    game, t = start_duel()
+    t = knock_out(game, 1, 2, t)
+    t = step(game, duel, int(game.cfg.countdown_s / DT) + 2, t)
+    t = knock_out(game, 2, 1, t)
+    t = step(game, duel, 2, t)
+    assert game.round_live and game.match_winner is None
+    knock_out(game, 2, 1, t)
+    assert game.mode == "match_over" and game.match_winner == 2
+    assert game.match_summary()[0] == ("ROUNDS WON", "1", "2")
+
+
+def test_self_bomb_in_a_duel_gives_the_opponent_the_round_without_damage_credit():
+    game, t = start_duel()
+    t = step(game, duel, 1, t)
+    game.states[1].hp = game.cfg.bomb_damage
+    game._set_off_bomb(1, np.array([600.0, 200.0], np.float32), t)
+    step(game, duel, 1, t)
+    assert game.winner == 2 and game.scores == {2: 1}
+    assert game.match_summary()[5] == ("DAMAGE DEALT", "0", "0")
+
+
+def leave_timeout_frames(game):
+    return int((game.cfg.come_back_after_s + game.cfg.leave_timeout_s) / DT) + 3
+
+
+def between_rounds_frames(game):
+    return int(game.cfg.round_end_s / DT) + 3
+
+
+def test_staying_gone_for_two_rounds_forfeits_the_match():
+    game, t = start_duel()
+    game.cfg.rounds_to_win = 3
+    t = step(game, duel, 1, t)
+    left_at = t
+
+    def p2_gone():
+        return [make_player(1, 300), Player(id=2, last_seen=left_at)]
+
+    t = step(game, p2_gone, leave_timeout_frames(game), t)
+    assert game.scores == {1: 1} and game.forfeited is None
+    t = step(game, p2_gone, between_rounds_frames(game), t)
+    assert game.mode == "duel" and game.round_live and game.missing_players == []
+    step(game, p2_gone, leave_timeout_frames(game), t)
     assert game.mode == "forfeit" and game.forfeited == 2
+    assert game.match_winner == 1 and game.scores == {1: 2}
+
+
+def test_a_knockout_between_walkouts_means_they_are_not_back_to_back():
+    game, t = start_duel()
+    game.cfg.rounds_to_win = 5
+    t = step(game, duel, 1, t)
+
+    def walk_out(t):
+        left_at = t
+
+        def p2_gone():
+            return [make_player(1, 300), Player(id=2, last_seen=left_at)]
+
+        t = step(game, p2_gone, leave_timeout_frames(game), t)
+        return step(game, duel, between_rounds_frames(game), t)
+
+    t = walk_out(t)
+    assert game.mode == "duel" and game.round_live
+    t = knock_out(game, 2, 1, t)
+    t = step(game, duel, int(game.cfg.countdown_s / DT) + 2, t)
+    walk_out(t)
+    assert game.forfeited is None and game.scores == {1: 2, 2: 1}
 
 
 def test_grenade_aim_previews_a_lob_onto_the_opponent():

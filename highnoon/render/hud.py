@@ -29,6 +29,12 @@ ENROL_TEXT = "HANDING OUT PLAYER IDS"
 WIN_SUBTITLE = "WINS THE ROUND"
 BLOWN_UP = "BLOWN UP"
 BLOWN_UP_SUBTITLE = "DON'T SHOOT THE BOMBS"
+WALKOUT_SUBTITLE = "WINS THE ROUND: OPPONENT LEFT"
+FINAL_RESULTS = "FINAL RESULTS NEXT"
+MATCH_WIN_SUBTITLE = "WINS THE MATCH"
+FORFEIT_SUBTITLE = "WINS BY FORFEIT"
+REMATCH_HINT = "PRESS R FOR A REMATCH, Q TO QUIT"
+QUIT_HINT = "PRESS Q TO QUIT"
 ZOOM_FROM = 0.3
 ZOOM_OVERSHOOT = 1.15
 SHRINK_TO = 0.4
@@ -68,7 +74,6 @@ class Hud:
         self._waiting_sprites(scale)
         self._waiting_sprites(scale, PRACTICE_WAITING_LINES)
         for player_id in self.colors:
-            self._lose_sprite(player_id, scale)
             for seconds_left in range(6):
                 self._come_back_sprites(player_id, seconds_left, scale)
         self._enrol_sprite(scale)
@@ -76,12 +81,13 @@ class Hud:
             self._countdown_sprite(number, scale)
         self._blown_up_sprite(scale)
         for seconds_left in range(5):
-            for subtitle in (WIN_SUBTITLE, BLOWN_UP_SUBTITLE):
-                self._round_over_texts(seconds_left, scale, subtitle)
+            for subtitle in (WIN_SUBTITLE, WALKOUT_SUBTITLE, BLOWN_UP_SUBTITLE):
+                self._round_over_texts(f"NEXT ROUND IN {seconds_left}", scale, subtitle)
+        self._round_over_texts(FINAL_RESULTS, scale)
 
-    def _round_over_texts(self, seconds_left: int, scale: float, subtitle: str = WIN_SUBTITLE):
+    def _round_over_texts(self, next_up: str, scale: float, subtitle: str = WIN_SUBTITLE):
         subtitle = self.text.get(subtitle, int(48 * scale), CREAM, HUD_FONT, stroke=2)
-        countdown = self.text.get(f"NEXT ROUND IN {seconds_left}", int(28 * scale), GOLD, HUD_FONT)
+        countdown = self.text.get(next_up, int(28 * scale), GOLD, HUD_FONT)
         return subtitle, countdown
 
     def _announcement_sprite(self, text: str, size: int, color, scale: float):
@@ -112,11 +118,13 @@ class Hud:
             self._draw_name_tag(image, game, player, t, scale)
         if not round_over:
             self._draw_float_texts(image, t, scale)
-        for player in visible:
-            self._draw_card(image, game, player, t, scale, round_over)
+        match_ended = game.mode == "match_over" or game.forfeited is not None
+        if not match_ended:
+            for player in visible:
+                self._draw_card(image, game, player, t, scale, round_over)
         if not round_over:
             self._draw_reload_warnings(image, game, visible, t, scale)
-        if self._winner_revealed(game, t):
+        if self._winner_revealed(game, t) and not match_ended:
             self._draw_winner(image, game, t, scale)
         if game.mode == "countdown":
             self._draw_countdown(image, game.countdown_left(t), scale)
@@ -127,8 +135,8 @@ class Hud:
             self._draw_waiting(image, t, scale, lines)
         if not round_over and game.forfeited is None:
             self._draw_come_back(image, game, t, scale)
-        if game.forfeited is not None:
-            self._draw_forfeit(image, game, scale)
+        if match_ended:
+            self._draw_match_summary(image, game, scale)
         self._draw_announcements(image, t, scale)
 
     def _waiting_sprites(self, scale: float, lines=WAITING_LINES):
@@ -148,7 +156,7 @@ class Hud:
         color = self.colors.get(player_id, WHITE)
         return (
             self._announcement_sprite(f"P{player_id}: WAITING FOR PLAYER ID", 64, color, scale),
-            self._announcement_sprite(f"GAME ENDS IN {seconds_left}s", 64, color, scale),
+            self._announcement_sprite(f"ROUND ENDS IN {seconds_left}s", 64, color, scale),
         )
 
     def _draw_come_back(self, image, game: Game, t: float, scale: float) -> None:
@@ -161,14 +169,34 @@ class Hud:
                 blit_center(image, sprite, width / 2, y, alpha)
                 y += sprite.height
 
-    def _lose_sprite(self, player_id: int, scale: float):
-        color = self.colors.get(player_id, WHITE)
-        return self._announcement_sprite(f"PLAYER {player_id}: YOU LOSE", 110, color, scale)
-
-    def _draw_forfeit(self, image, game: Game, scale: float) -> None:
+    def _draw_match_summary(self, image, game: Game, scale: float) -> None:
         height, width = image.shape[:2]
-        cv2.convertScaleAbs(image, dst=image, alpha=0.45)
-        blit_center(image, self._lose_sprite(game.forfeited, scale), width / 2, height * 0.42)
+        cv2.convertScaleAbs(image, dst=image, alpha=0.3)
+        winner = game.match_winner
+        y = height * 0.13
+        if winner is not None:
+            blit_center(image, self._winner_name(winner, scale), width / 2, y)
+        y += 72 * scale
+        subtitle = FORFEIT_SUBTITLE if game.forfeited is not None else MATCH_WIN_SUBTITLE
+        blit_center(image, self.text.get(subtitle, int(40 * scale), CREAM, HUD_FONT, stroke=2), width / 2, y)
+        left, right = width * 0.27, width * 0.73
+        y += 62 * scale
+        for player_id, x in ((1, left), (2, right)):
+            color = self.colors.get(player_id, WHITE)
+            label = self.text.get(f"P{player_id}", int(36 * scale), color, HUD_FONT, stroke=2)
+            blit_center(image, label, x, y)
+        for label, first, second in game.match_summary():
+            y += 46 * scale
+            blit_center(image, self.text.get(label, int(28 * scale), GOLD, HUD_FONT, stroke=2), width / 2, y)
+            for value, x in ((first, left), (second, right)):
+                blit_center(image, self.text.get(value, int(34 * scale), WHITE, HUD_FONT, stroke=2), x, y)
+        y += 50 * scale
+        minutes, seconds = divmod(int(game.match_time_s), 60)
+        duration = self.text.get(f"MATCH TIME {minutes}:{seconds:02d}", int(26 * scale), CREAM, HUD_FONT)
+        blit_center(image, duration, width / 2, y)
+        hint = QUIT_HINT if game.forfeited is not None else REMATCH_HINT
+        sprite = self.text.get(hint, int(24 * scale), GOLD, HUD_FONT)
+        blit_center(image, sprite, width / 2, height - 30 * scale)
 
     def _enrol_sprite(self, scale: float):
         return self._announcement_sprite(ENROL_TEXT, 64, CREAM, scale)
@@ -301,8 +329,9 @@ class Hud:
 
         name = self.text.get(f"PLAYER {player.id}", int(30 * scale), color, HUD_FONT)
         blit(image, name, x0 + int(22 * scale), y0 + int(6 * scale))
-        unit = "BOTTLES" if game.cfg.practice else "WINS"
-        score = self.text.get(f"{game.scores.get(player.id, 0)} {unit}", int(24 * scale), CREAM, HUD_FONT)
+        wins = game.scores.get(player.id, 0)
+        tally = f"{wins} BOTTLES" if game.cfg.practice else f"{wins}/{game.cfg.rounds_to_win} WINS"
+        score = self.text.get(tally, int(24 * scale), CREAM, HUD_FONT)
         blit(image, score, x0 + card_w - score.width - int(12 * scale), y0 + int(10 * scale))
 
         self._draw_hp_bar(image, game, player.id, x0, y0, card_w, scale)
@@ -351,7 +380,7 @@ class Hud:
             self._winner_reveal_t, self._knockout_shown = None, False
             return False
         if self._winner_reveal_t is None:
-            if not self._knockout_shown:
+            if not self._knockout_shown and game.walked_out is None:
                 text, color, size = effects.KNOCKOUT
                 self.fx.interrupt(text, t, color, size, effects.KNOCKOUT_S)
                 self._knockout_shown = True
@@ -367,9 +396,12 @@ class Hud:
         if game.winner is None:
             name, subtitle_text = self._blown_up_sprite(scale), BLOWN_UP_SUBTITLE
         else:
-            name, subtitle_text = self._winner_name(game.winner, scale), WIN_SUBTITLE
+            subtitle_text = WALKOUT_SUBTITLE if game.walked_out is not None else WIN_SUBTITLE
+            name = self._winner_name(game.winner, scale)
         left = game.cfg.round_end_s - (t - (game.round_over_t or t))
-        subtitle, countdown = self._round_over_texts(max(0, math.ceil(left)), scale, subtitle_text)
+        seconds_left = max(0, math.ceil(left))
+        next_up = FINAL_RESULTS if game.match_winner is not None else f"NEXT ROUND IN {seconds_left}"
+        subtitle, countdown = self._round_over_texts(next_up, scale, subtitle_text)
         zoom, alpha = zoom_in(age)
         y = height * 0.42
         blit_center(image, assets.scaled(name, zoom), width / 2, y, alpha)

@@ -5,6 +5,7 @@ import numpy as np
 
 from highnoon.config import GameConfig
 from highnoon.contracts import Player
+from highnoon.core.match_log import PLAYER_IDS, PlayerTally, count_effect
 from highnoon.game.actions import PlayerActions, Shot
 from highnoon.game.entities import (
     Aim,
@@ -50,10 +51,16 @@ class Game:
         self.mode = "idle"
         self.winner: int | None = None
         self.forfeited: int | None = None
+        self.walked_out: int | None = None
+        self._last_walkout: int | None = None
+        self._absence_from = 0.0
         self.round_over_t: float | None = None
         self.round = 0
         self.round_start_t = 0.0
         self.scores: dict[int, int] = {}
+        self.match_stats = new_match_stats()
+        self.match_time_s = 0.0
+        self._counted_effects: set[int] = set()
         self._next_powerup_t: float | None = None
         self._next_bottle_t = 0.0
         self.countdown_end_t: float | None = None
@@ -71,15 +78,22 @@ class Game:
         self._hitboxes = {p.id: hitbox(p) for p in players if p.visible and p.smoothed is not None}
         self._wall = self.wall
         self._create_states(players, reassigned)
-        self._update_mode(sum(p.visible for p in players) >= (1 if self.cfg.practice else 2), t)
+        in_view = sum(p.visible for p in players) >= (1 if self.cfg.practice else 2)
+        # After a walkout the next round starts without waiting, so a player who stays gone runs out the
+        # timer again instead of leaving the game stuck on "step into view".
+        self._update_mode(in_view or self._last_walkout is not None, t)
         self._check_forfeit(t)
         if (
             self.forfeited is None
             and self.round_over_t is not None
             and t - self.round_over_t >= self.cfg.round_end_s
         ):
-            self.reset_round()
-            self.mode, self.countdown_end_t = "countdown", t + self.cfg.countdown_s
+            if self.match_winner is not None:
+                self.mode = "match_over"
+            else:
+                # The winner screen already counted down, so the next round has no 3-2-1.
+                self.reset_round()
+                self.mode, self.countdown_end_t = "countdown", t
         self._update_powerup(t)
         self._update_bottles(t)
         for player in players:
@@ -88,6 +102,7 @@ class Game:
         self._update_rockets(t)
         self._update_grenades(t)
         self._update_aims(players)
+        self._count_match_effects()
         self.effects = [e for e in self.effects if t - e.t < EFFECT_LIFETIME_S]
 
     @property
@@ -106,8 +121,55 @@ class Game:
     def round_live(self) -> bool:
         return self.mode == "duel" and self.round_over_t is None
 
+    @property
+    def match_winner(self) -> int | None:
+        if self.forfeited is not None:
+            return self._other_player(self.forfeited)
+        if self.cfg.practice:
+            return None
+        return next((p for p, wins in self.scores.items() if wins >= self.cfg.rounds_to_win), None)
+
+    def match_summary(self) -> list[tuple[str, str, str]]:
+        """One (label, player 1, player 2) row per statistic on the final screen."""
+        counts = {player_id: self.match_stats[player_id].counts for player_id in PLAYER_IDS}
+
+        def row(label, value):
+            return label, value(1), value(2)
+
+        def accuracy(player_id):
+            shots = counts[player_id]["shots"]
+            return f"{100 * counts[player_id]['bullet_hits'] / shots:.0f}%" if shots else "-"
+
+        return [
+            row("ROUNDS WON", lambda p: str(self.scores.get(p, 0))),
+            row("SHOTS FIRED", lambda p: str(counts[p]["shots"])),
+            row("ACCURACY", accuracy),
+            row("HEADSHOTS", lambda p: str(counts[p]["headshots"])),
+            row("EXPLOSIVES", lambda p: str(counts[p]["rockets"] + counts[p]["grenades"])),
+            row("DAMAGE DEALT", lambda p: str(counts[p]["damage_dealt"])),
+        ]
+
+    def new_match(self) -> None:
+        self.scores.clear()
+        self.match_stats = new_match_stats()
+        self.match_time_s = 0.0
+        self._last_walkout = None
+        self.reset_round()
+        self.mode, self.countdown_end_t = "countdown", self._t + self.cfg.countdown_s
+
+    def _other_player(self, player_id: int) -> int | None:
+        return next((p for p in self.states if p != player_id), None)
+
+    def _count_match_effects(self) -> None:
+        for effect in self.effects:
+            if id(effect) not in self._counted_effects and effect.player in self.match_stats:
+                count_effect(self.match_stats, effect)
+        self._counted_effects = {id(effect) for effect in self.effects}
+
     def _absent_for(self, player: Player) -> float:
-        return self._t - player.last_seen if not player.visible and player.id in self.states else 0.0
+        if player.visible or player.id not in self.states:
+            return 0.0
+        return self._t - max(player.last_seen, self._absence_from)
 
     @property
     def missing_players(self) -> list[int]:
@@ -116,21 +178,32 @@ class Game:
         return [p.id for p in self._players.values() if self._absent_for(p) > self.cfg.come_back_after_s]
 
     def leave_countdown(self, player_id: int) -> float:
-        """Seconds until a missing player forfeits the game."""
+        """Seconds until a missing player loses the round."""
         absent = self._absent_for(self._players[player_id])
         return max(0.0, self.cfg.come_back_after_s + self.cfg.leave_timeout_s - absent)
 
     def _check_forfeit(self, t: float) -> None:
-        if self.forfeited is not None:
+        if not self.round_live:
             return
         for player_id in self.missing_players:
             if self.leave_countdown(player_id) <= 0:
-                self.forfeited = player_id
-                self.mode = "forfeit"
-                self.bullets.clear()
-                self.rockets.clear()
-                self.grenades.clear()
+                self._walk_out(player_id, t)
                 return
+
+    def _walk_out(self, player_id: int, t: float) -> None:
+        self.bullets.clear()
+        self.rockets.clear()
+        self.grenades.clear()
+        self.round_over_t = t
+        self.match_time_s += t - self.round_start_t
+        self.walked_out = player_id
+        self.winner = self._other_player(player_id)
+        if self.winner is not None:
+            self.scores[self.winner] = self.scores.get(self.winner, 0) + 1
+        if self._last_walkout == player_id:
+            self.forfeited = player_id
+            self.mode = "forfeit"
+        self._last_walkout = player_id
 
     def countdown_left(self, t: float) -> float:
         return max(0.0, self.countdown_end_t - t) if self.mode == "countdown" else 0.0
@@ -168,7 +241,9 @@ class Game:
         self.bottles.clear()
         self._next_bottle_t = 0.0
         self.winner = None
+        self.walked_out = None
         self.round_over_t = None
+        self._absence_from = self._t
         self.round += 1
         self.round_start_t = self._t
 
@@ -385,9 +460,12 @@ class Game:
         self.effects.append(Effect(effect, pos, t, shooter, amount, detail=source))
         if state.hp == 0:
             self.round_over_t = t
-            if shooter != target:
-                self.winner = shooter
-                self.scores[shooter] = self.scores.get(shooter, 0) + 1
+            self._last_walkout = None
+            self.match_time_s += t - self.round_start_t
+            winner = shooter if shooter != target else self._other_player(target)
+            if winner is not None and not self.cfg.practice:
+                self.winner = winner
+                self.scores[winner] = self.scores.get(winner, 0) + 1
 
     def muzzle(self, hand: np.ndarray, direction: np.ndarray, weapon: str = "gun") -> np.ndarray:
         return (hand + direction * self.reach(weapon) * self.height).astype(np.float32)
@@ -542,6 +620,10 @@ class Game:
         box = self._hitboxes.get(player_id)
         hurt_at = box.torso.mean(axis=0) if box else pos
         self._damage(player_id, player_id, self.cfg.bomb_damage, "hit", hurt_at, t, "bomb")
+
+
+def new_match_stats() -> dict[int, PlayerTally]:
+    return {player_id: PlayerTally() for player_id in PLAYER_IDS}
 
 
 def hitbox(player: Player) -> Hitbox:

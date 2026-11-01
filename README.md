@@ -99,7 +99,7 @@ Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in fr
   down 3-2-1, and every new round starts with the same countdown. Nobody can shoot during it.
   Both players have to stay in view for 3 s before the countdown starts, so nothing flickers when
   someone is briefly missed. If a player is out of view for more than 3 s mid-game, the screen tells
-  them to come back; after 5 s more they forfeit.
+  them to come back; after 5 s more they lose the round (twice in a row loses the match).
 - **Duel.** A body hit costs 10 HP and a headshot 25 (4 headshots or 10 body hits to win). First to 0 loses the round.
   Bullets take 0.45 s to arrive, so you can duck when you see your opponent fire.
 - **Powerups (duel only).** Every 15 s a powerup drops from the top of the screen down the
