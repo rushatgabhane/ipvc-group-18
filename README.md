@@ -174,6 +174,10 @@ with the delay the smoothing adds, identity gaps and how long re-identification 
 switches and consistency (checked against each player's faces from their first seconds), the face
 match score distributions behind the thresholds, and each player's distance in metres.
 
+**Latency per task.** `tools/task_latency.py results/session_metrics.csv` turns a live session's
+`--metrics-csv` into a table of each stage's mean and p95 time grouped by task (T1-T5), with the
+average FPS, dropped frames and capture-to-screen latency.
+
 **Module failures.** `--fail-module NAME[:P]` makes a module fail on purpose (every call, or with
 probability P), e.g. `--fail-module hand` or `--fail-module face:0.3`. Every module runs through
 `core/guard.py`, so the game keeps running without it and prints a summary of failures at exit.
@@ -247,6 +251,7 @@ tools/
   download_models.py   fetch + verify model weights
   analyze_clip.py      replay a clip through the game, log signals + detected actions
   evaluate_clip.py     replay a clip and write the report's evaluation numbers (results/*_eval.md)
+  task_latency.py      per-task (T1-T5) stage latency, FPS and end-to-end latency from --metrics-csv
   record.py            record raw webcam clips for repeatable tests
 tests/                 pytest unit tests
 assets/fonts/          Rye and Bebas Neue (SIL Open Font License, licence files included)
