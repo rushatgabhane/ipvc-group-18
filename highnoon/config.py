@@ -68,6 +68,11 @@ class GameConfig:
     fist_open: float = 1.45
     aim_lookback_s: float = 0.1
     armed_after_s: float = 0.3
+    # A fist made while the aim is still settling waits this long to fire instead of being dropped.
+    fist_queue_s: float = 0.35
+    # A fist this soon after the aim was lost (the wrist bends down when the hand closes) fires along the
+    # last steady aim.
+    aim_grace_s: float = 0.25
     fire_cooldown_s: float = 0.6
     recoil_per_shot_deg: float = 10.0
     recoil_recovery_s: float = 1.2

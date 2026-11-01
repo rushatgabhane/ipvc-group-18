@@ -146,10 +146,21 @@ If one fails, the fist is ignored and the reason is shown in the debug overlay a
 
 | Check | Value | Reason shown if it fails |
 |---|---|---|
-| The aim is valid | Section 4.1 | `not aiming` |
+| The aim is valid, or was valid less than `aim_grace_s = 0.25` s ago | Section 4.1 | `not aiming` |
 | The player is not ducked | — | `ducked` |
-| The player has aimed for at least | `armed_after_s = 0.3` s | `aim settling` |
 | Time since the last shot is at least | `fire_cooldown_s = 0.6` s | `cooldown` |
+| The player has aimed for at least | `armed_after_s = 0.3` s | `aim settling` |
+
+- **Fist while the aim settles:** it is not dropped. It waits up to `fist_queue_s = 0.35` s and fires
+  as soon as the aim has settled, if the hand is still closed. Raising the arm and closing the fist in
+  one quick move therefore still fires. `aim settling` is only reported if the hand opens again or the
+  wait runs out.
+- **Fist that bends the wrist:** closing the hand bends the wrist down, which can tip the palm's aim
+  below the -50° limit on the very frame of the fist. A fist within `aim_grace_s` of the last valid aim
+  fires along that last steady aim.
+- **Measured before the change** (signal logs of three two-player sessions): of the fists that did not
+  fire, 25-40% were `aim settling` and several `not aiming` fists came right after a valid aim, with the
+  elevation just below -50°. Fists with the arm down for longer (-65° to -90°) are still ignored.
 
 With a bullet weapon and an empty magazine the fist is a **dry fire**: a click sound is played and
 `no ammo` appears in the debug overlay.
@@ -221,7 +232,12 @@ The game starts at `max_hp = 100`. When a player fires, the weapon is chosen in 
   bullet with a faint streak.
 - **Travel time:** a bullet arrives `bullet_travel_s = 0.6` s after the shot. When it arrives, the
   ray is cast again from the original muzzle position, in the original direction, against the **current**
-  positions. A player who ducks or moves away during that time dodges it.
+  positions. **Ducking dodges it:** a player who ducks behind the wall in that time is protected.
+- **On target when fired:** if the ray hit a player when the shot was fired, it still hits them on
+  arrival unless they ducked, even if the new cast misses. Before, a small sway during the flight, or
+  a frame in which the target's body was not detected, let a bullet pass through a player it had
+  visibly reached. A target counts as present if they were seen in the last 0.3 s; one who has left
+  the picture is not hit.
 - **What it hits:** whatever the ray meets first:
   - the wall: "BLOCKED"
   - a ducked player: also cover, "BLOCKED"

@@ -104,6 +104,21 @@ def test_shot_hits_standing_player_and_is_blocked_when_ducked():
     assert game.states[2].hp == 100 - game.cfg.body_damage
 
 
+def test_a_bullet_on_target_hits_even_if_the_body_is_missed_when_it_arrives():
+    game, t = start_duel()
+    t = step(game, duel, 12, t)
+    t = step(game, lambda: duel(hand=FIST), 1, t)
+    seen = t
+
+    def p2_missed():  # P2 still there, but the detector lost their body for a few frames
+        return [make_player(1, 300), Player(id=2, last_seen=seen)]
+
+    step(game, duel, int(game.cfg.bullet_travel_s / DT) - 3, t)
+    seen = t + game.cfg.bullet_travel_s - 3 * DT
+    step(game, p2_missed, 6, seen)
+    assert game.states[2].hp == 100 - game.cfg.body_damage
+
+
 def test_wall_is_static_and_blocks_low_shots():
     game = Game(GameConfig(), (1280, 720))
     game.update(duel(), 0.0, set())

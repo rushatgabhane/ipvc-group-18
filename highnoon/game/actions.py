@@ -45,6 +45,9 @@ class PlayerActions:
         self._recoil_t = 0.0
         self._recent_aims: deque[AimSample] = deque()
         self._aiming_since: float | None = None
+        self._last_aim_t: float | None = None
+        self._pending_fist_t: float | None = None
+        self._pending_reason: str | None = None
         self._last_shot_t = -math.inf
         self._hand_closed: bool | None = None
         self._ducked_since: float | None = None
@@ -55,6 +58,7 @@ class PlayerActions:
         if signals is None:
             self._stop_aiming()
             self._hand_closed = None
+            self._pending_fist_t = None
             return ActionFrame(ducked=self.ducked)
         head_pos = self._update_duck(signals.head_y / frame_height)
         reload, reload_progress = self._update_reload(t)
@@ -96,26 +100,50 @@ class PlayerActions:
     def _stop_aiming(self) -> None:
         self._recent_aims.clear()
         self._aiming_since = None
+        self._last_aim_t = None
 
     def _update_trigger(self, signals: MotionSignals, t: float) -> tuple[bool, Shot | None, str | None]:
-        fist_closed = self._update_hand(signals.hand_openness)
-        if not signals.aim_valid:
+        if self._update_hand(signals.hand_openness):
+            self._pending_fist_t, self._pending_reason = t, None
+
+        if signals.aim_valid:
+            self._last_aim_t = t
+            if self._aiming_since is None:
+                self._aiming_since = t
+            if not self.ducked:
+                self._remember_aim(AimSample(t, signals.aim_origin, signals.aim_dir))
+        elif not self._in_aim_grace(t):
             self._stop_aiming()
-            return False, None, "not aiming" if fist_closed else None
-        if self._aiming_since is None:
-            self._aiming_since = t
         if self.ducked:
             self._recent_aims.clear()
-            return False, None, "ducked" if fist_closed else None
-        self._remember_aim(AimSample(t, signals.aim_origin, signals.aim_dir))
-        if not fist_closed:
-            return True, None, None
+
+        aiming = signals.aim_valid and not self.ducked
+        if self._pending_fist_t is None:
+            return aiming, None, None
         blocker = self._fire_blocker(t)
-        if blocker is not None:
-            return True, None, blocker
-        self._last_shot_t = t
-        steady_aim = self._recent_aims[0]
-        return True, Shot(steady_aim.origin.copy(), self._apply_recoil(steady_aim.direction, t)), None
+        if blocker is None:
+            self._pending_fist_t = None
+            self._last_shot_t = t
+            steady_aim = self._recent_aims[0]
+            return aiming, Shot(steady_aim.origin.copy(), self._apply_recoil(steady_aim.direction, t)), None
+        # Only a fist made while the aim settles is worth waiting for; the others are dropped at once.
+        waiting = (
+            blocker == "aim settling"
+            and self._hand_closed
+            and t - self._pending_fist_t <= self.cfg.fist_queue_s
+        )
+        if waiting:
+            self._pending_reason = blocker
+            return aiming, None, None
+        self._pending_fist_t = None
+        return aiming, None, blocker
+
+    def _in_aim_grace(self, t: float) -> bool:
+        return (
+            self._last_aim_t is not None
+            and t - self._last_aim_t <= self.cfg.aim_grace_s
+            and bool(self._recent_aims)
+        )
 
     def spread_at(self, t: float) -> float:
         recovery_per_s = self.cfg.recoil_per_shot_deg / self.cfg.recoil_recovery_s
@@ -128,10 +156,14 @@ class PlayerActions:
         return rotate(direction, math.radians(self._rng.uniform(-spread, spread)))
 
     def _fire_blocker(self, t: float) -> str | None:
-        if t - self._aiming_since < self.cfg.armed_after_s:
-            return "aim settling"
+        if self.ducked:
+            return "ducked"
+        if self._aiming_since is None or not self._recent_aims:
+            return "not aiming"
         if t - self._last_shot_t < self.cfg.fire_cooldown_s:
             return "cooldown"
+        if t - self._aiming_since < self.cfg.armed_after_s:
+            return "aim settling"
         return None
 
     def _remember_aim(self, sample: AimSample) -> None:

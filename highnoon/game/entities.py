@@ -46,6 +46,7 @@ class Bullet:
     length: float
     t_fire: float
     t_arrive: float
+    aimed_at: tuple = ("miss", None)  # what the ray hit when fired: ("head" | "body", player id), ...
 
     def progress(self, t: float) -> float:
         return min(1.0, (t - self.t_fire) / max(self.t_arrive - self.t_fire, 1e-6))

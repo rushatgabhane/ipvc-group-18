@@ -36,6 +36,10 @@ LOB_PREVIEW_STEPS = np.linspace(0.0, 1.0, 25, dtype=np.float32)
 ARC_PREVIEW_STEPS = 60
 
 
+# A target whose body was missed for this long is still there for a bullet already on its way to them.
+TARGET_DROPOUT_S = 0.3
+
+
 class Game:
     def __init__(self, cfg: GameConfig, frame_size: tuple[int, int], seed: int = 0):
         self.cfg = cfg
@@ -317,9 +321,9 @@ class Game:
             self.rockets.append(Rocket(shooter, origin, velocity, gravity, t, origin.copy()))
         else:
             state.ammo -= 1
-            length, _ = self._cast(shooter, origin, shot.direction)
+            length, aimed_at = self._cast(shooter, origin, shot.direction)
             arrival = t + self.cfg.bullet_travel_s
-            self.bullets.append(Bullet(shooter, origin, shot.direction, length, t, arrival))
+            self.bullets.append(Bullet(shooter, origin, shot.direction, length, t, arrival, aimed_at))
         self.effects.append(Effect("muzzle", origin, t, shooter, detail=weapon))
 
     @staticmethod
@@ -340,6 +344,9 @@ class Game:
                 continue
             distance, (kind, target) = self._cast(bullet.shooter, bullet.origin, bullet.direction)
             impact = bullet.origin + bullet.direction * distance
+            if kind == "miss" and self._still_on_target(bullet):
+                kind, target = bullet.aimed_at
+                impact = bullet.origin + bullet.direction * bullet.length
             if kind in ("head", "body") and self.round_live:
                 damage = self.cfg.head_damage if kind == "head" else self.cfg.body_damage
                 effect = "headshot" if kind == "head" else "hit"
@@ -351,6 +358,20 @@ class Game:
             elif kind == "bottle":
                 self._shatter(bullet.shooter, target, t)
         self.bullets = in_flight
+
+    def _still_on_target(self, bullet: Bullet) -> bool:
+        """A bullet that was on a player when fired hits them unless they ducked behind the wall.
+
+        Ducking is the way to dodge. Without this, a small sway during the 0.6 s flight, or a frame in
+        which the target's body was not detected, let the bullet pass through a player it visibly reached.
+        """
+        kind, target = bullet.aimed_at
+        if kind not in ("head", "body"):
+            return False
+        state, player = self.states.get(target), self._players.get(target)
+        if state is None or player is None or state.frame.ducked:
+            return False
+        return player.visible or self._t - player.last_seen <= TARGET_DROPOUT_S
 
     def _rocket_launch(self, direction: np.ndarray) -> tuple[np.ndarray, float]:
         speed = self.cfg.rocket_speed * self.height

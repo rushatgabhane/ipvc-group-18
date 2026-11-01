@@ -111,8 +111,8 @@ def test_ignored_fists_report_why():
     )
     assert frames[15].shot is not None
     assert frames[21].ignored_fist == "cooldown"
-    frames = run(PlayerActions(CFG), [sig()] * 3 + [sig(hand=FIST)])
-    assert frames[3].ignored_fist == "aim settling"
+    frames = run(PlayerActions(CFG), [sig()] * 3 + [sig(hand=FIST), sig()])
+    assert frames[4].ignored_fist == "aim settling"  # let go before the aim settled
     frames = run(PlayerActions(CFG), [sig(aim=False)] * 5 + [sig(aim=False, hand=FIST)])
     assert frames[5].ignored_fist == "not aiming"
 
@@ -132,3 +132,24 @@ def test_rapid_shots_lose_accuracy_and_recover():
     assert max(f.spread_deg for f in frames) > 5
     spaced, _ = fire_burst(int(2 * CFG.recoil_recovery_s / DT))
     assert len(spaced) == 3 and max(spaced) < 1e-3
+
+
+def test_a_fist_made_while_the_aim_settles_fires_once_it_has_settled():
+    frames = run(PlayerActions(CFG), [sig()] * 3 + [sig(hand=FIST)] * 10)
+    armed = math.ceil(CFG.armed_after_s / DT - 1e-9)
+    assert shot_frames(frames) == [armed]
+    assert not any(f.ignored_fist for f in frames)
+
+
+def test_a_fist_that_bends_the_wrist_out_of_aim_still_fires_along_the_last_aim():
+    frames = run(PlayerActions(CFG), [sig(10)] * 15 + [sig(-60, aim=False, hand=FIST)])
+    assert shot_frames(frames) == [15]
+    shot = frames[15].shot
+    assert abs(np.degrees(np.arctan2(-shot.direction[1], shot.direction[0])) - 10) < 1
+
+
+def test_a_fist_with_the_arm_down_for_a_while_does_not_fire():
+    grace = int(CFG.aim_grace_s / DT) + 2
+    frames = run(PlayerActions(CFG), [sig()] * 15 + [sig(aim=False)] * grace + [sig(aim=False, hand=FIST)])
+    assert shot_frames(frames) == []
+    assert frames[-1].ignored_fist == "not aiming"
