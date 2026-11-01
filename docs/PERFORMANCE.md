@@ -214,6 +214,7 @@ exit only covers the last 120 frames, which were idle; an earlier version of thi
 | `1106` (identity fix) | 181 s | 23.3 | 75.5 / 93.5 ms | 38.7 ms | 22.4 ms | 16.2 ms | 41.6 ms | 4.2 ms | 0.30 fr |
 | `1141` (demo take, also recording game output + raw camera) | 73 s | 25.5 | 64.2 / 89.6 ms | 34.9 ms | 17.0 ms | 11.2 ms | 32.7 ms | 2.1 ms | 0.20 fr |
 | `1143` (aborted take, mostly no faces in view; not a two-player figure) | 54 s | 30.0 | 31.8 / 43.9 ms | 18.2 ms | 3.6 ms | 1.1 ms | 24.3 ms | 1.9 ms | 0.02 fr |
+| `122227` (**the demo video**, logs in `docs/metrics/demo_session/`) | 69 s | 27.1 | 66.6 / 83.9 ms | 31.8 ms | 19.4 ms | 14.6 ms | 34.8 ms | 3.6 ms | 0.12 fr |
 
 With two players the game runs at **23-26 fps with 64-76 ms from capture to screen**, below the
 camera's 30 fps. Pose (37-39 ms) is over the 33 ms budget on its own. Since the head crops find faces,
