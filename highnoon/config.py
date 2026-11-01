@@ -143,6 +143,7 @@ class Config:
     signals_csv: Path | None = None
     games_csv: Path | None = Path("results/games.csv")
     record_video: Path | None = None
+    record_output: Path | None = None
     max_frames: int | None = None
     identity_csv: Path | None = None
     faults: dict[str, float] = field(default_factory=dict)

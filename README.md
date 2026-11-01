@@ -161,6 +161,10 @@ latency, ready for the plots in the report. `--identity-csv` writes one row per 
 visible, new id, position in pixels and metres, whether a face was seen and how well it matched the
 id's owner, and how many people in view had no id.
 
+**Demo video.** `--record-output clips/demo.mp4` saves the game exactly as shown (with the webcam
+inset) at real speed: when the game runs below 30 fps, frames are repeated so the video never plays
+faster than it happened. `--record` (raw camera, for replays) is paced the same way.
+
 **Report numbers from a recording.** Record a session, then replay it frame by frame:
 
 ```bash
