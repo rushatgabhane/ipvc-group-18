@@ -27,6 +27,8 @@ MASK_LOW, MASK_HIGH = 0.45, 0.9
 ERODE_KERNEL = np.ones((3, 3), np.uint8)
 MAX_FRAME_STEP_S = 0.1
 DEMO_SECONDS = 60
+# When the pose model finds nobody, the last person mask is kept this long before the scene shows no one.
+MASK_HOLD_S = 0.5
 STATS_SHOWN = ("latency", "inference", "pose", "face", "hand", "render")
 INSET_HEIGHT = 0.14
 INSET_MARGIN = 0.022
@@ -46,6 +48,8 @@ class Renderer:
         self.shake = (0, 0)
         self._t_last: float | None = None
         self._timer_start: float | None = None
+        self._last_mask: np.ndarray | None = None
+        self._last_mask_t = -np.inf
 
     def render(
         self, perception: Perception, players: list[Player], game: Game, profiler: Profiler
@@ -59,7 +63,7 @@ class Renderer:
         if self.scenery.build(width, height, game.cfg.cover_height):
             self.hud.prewarm(height)
         self.scenery.update(game)
-        base = self._camera_layer(frame.image, perception.mask)
+        base = self._camera_layer(frame.image, self._person_mask(perception.mask, frame.t_capture))
         if self.cfg.show_debug:
             for player in players:
                 if player.visible:
@@ -133,9 +137,22 @@ class Renderer:
         image[y0:y1, x0:x1] = self._inset
         cv2.rectangle(image, (x0 - 2, y0 - 2), (x1 + 1, y1 + 1), INSET_BORDER, 2)
 
+    def _person_mask(self, mask: np.ndarray | None, t: float) -> np.ndarray | None:
+        """The mask to cut players out with. A frame in which the pose model finds nobody (it can lose both
+        players for a frame or two while they cross) keeps the last mask, so the background never flickers
+        to the raw camera; after MASK_HOLD_S the scene is shown with nobody in it."""
+        if mask is not None:
+            self._last_mask, self._last_mask_t = mask, t
+            return mask
+        if self._last_mask is not None and t - self._last_mask_t <= MASK_HOLD_S:
+            return self._last_mask
+        return None
+
     def _camera_layer(self, camera: np.ndarray, mask: np.ndarray | None) -> np.ndarray:
-        if not self.cfg.background or mask is None:
+        if not self.cfg.background:
             return camera.copy()
+        if mask is None:  # nobody in view
+            return self.scenery.background.copy()
         if mask.shape != camera.shape[:2]:
             mask = cv2.resize(mask, (camera.shape[1], camera.shape[0]), interpolation=cv2.INTER_LINEAR)
         gain = 1.0 / (MASK_HIGH - MASK_LOW)

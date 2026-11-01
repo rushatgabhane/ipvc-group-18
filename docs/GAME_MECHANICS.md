@@ -348,6 +348,12 @@ ignored fists by reason. Practice mode does not write this log.
 
 These effects only change the picture; none of them affect the rules.
 
+- **Background replacement:** players are cut out of the camera picture with the pose model's person
+  mask and shown over the Western scenery (`b` toggles it). When the pose model finds nobody, which can
+  happen for a frame or two while the players cross, the last mask is kept for `MASK_HOLD_S = 0.5` s,
+  and after that the scenery is shown with nobody in it. The raw camera never flickers through; in a
+  recorded demo take it did for 4 frames (0.16 s) during a swap before this was added.
+
 - **Sunset:** during a duel the sky moves from midday towards sunset, and never gets to night. How far
   it goes is the larger of (time since the round started ÷ `SUNSET_AFTER_S = 60` s) and (the HP lost
   by the lowest player ÷ max HP). It never jumps: the sky eases towards that at `0.15` per second, so a

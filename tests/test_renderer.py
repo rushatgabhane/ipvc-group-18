@@ -110,3 +110,26 @@ def test_hat_is_drawn_for_a_face_without_eye_landmarks():
     face = make_face(300.0)
     FaceEffectRenderer().draw(canvas, measure_head(FaceObservation(face.landmarks[:10], face.bbox)))
     assert canvas.any()
+
+
+def test_the_background_never_flickers_to_the_raw_camera_when_nobody_is_detected():
+    renderer = Renderer(DisplayConfig())
+    renderer.world.draw = renderer.hud.draw = lambda *args: None
+    game = Game(GameConfig(), (WIDTH, HEIGHT))
+    camera = np.full((HEIGHT, WIDTH, 3), CAMERA_COLOR, np.uint8)
+    person = np.zeros((HEIGHT, WIDTH), np.float32)
+    person[200:400, 500:700] = 1.0
+
+    def frame(t, mask):
+        return renderer.render(
+            Perception(Frame(0, camera, t, int(t * 1000)), [], [], mask, t), [], game, None
+        )
+
+    with_mask = frame(0.0, person)
+    assert np.array_equal(
+        frame(0.2, None)[:WALL_TOP], with_mask[:WALL_TOP]
+    )  # a missed frame keeps the cut-out
+    empty = frame(1.0, None)[:WALL_TOP]
+    assert not np.any(
+        np.all(empty[250:350, 550:650] == CAMERA_COLOR, axis=-1)
+    )  # later: scenery, never the camera
