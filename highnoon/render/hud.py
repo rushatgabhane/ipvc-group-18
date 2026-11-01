@@ -318,7 +318,7 @@ class Hud:
         name = self.text.get(f"PLAYER {player.id}", int(30 * scale), color, HUD_FONT)
         blit(image, name, x0 + int(22 * scale), y0 + int(6 * scale))
         wins = game.scores.get(player.id, 0)
-        tally = f"{wins} BOTTLES" if game.cfg.practice else f"{wins}/{game.cfg.rounds_to_win} WINS"
+        tally = f"{wins} BOTTLES" if game.cfg.practice else f"{wins} WINS"
         score = self.text.get(tally, int(24 * scale), CREAM, HUD_FONT)
         blit(image, score, x0 + card_w - score.width - int(12 * scale), y0 + int(10 * scale))
 

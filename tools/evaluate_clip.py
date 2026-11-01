@@ -63,7 +63,7 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = Config()
-    cfg.game.rounds_to_win = NO_MATCH_END
+    cfg.game.match_rounds = NO_MATCH_END
     cfg.capture.source = str(args.clip)
     cfg.capture.realtime = False
     cfg.filters.camera_hfov_deg = args.hfov

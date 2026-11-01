@@ -37,10 +37,10 @@ def parse_args() -> Config:
     parser.add_argument("--demo-timer", action="store_true", help="show a 0-60 s timer for the peer video")
     parser.add_argument("--max-frames", type=int, help="stop after N frames")
     parser.add_argument(
-        "--rounds-to-win",
+        "--match-rounds",
         type=int,
-        default=2,
-        help="round wins that end the match (default 2, best of 3); use a large value for long benchmarks",
+        default=3,
+        help="rounds in a match, most wins takes it (default 3); use a large value for long benchmarks",
     )
     parser.add_argument(
         "--practice", action="store_true", help="single-player target practice: shoot bottles, no duel"
@@ -77,7 +77,7 @@ def parse_args() -> Config:
     cfg.filters.camera_hfov_deg = args.hfov
     cfg.identity_csv = args.identity_csv
     cfg.game.practice = args.practice
-    cfg.game.rounds_to_win = args.rounds_to_win
+    cfg.game.match_rounds = args.match_rounds
     if args.practice:
         cfg.games_csv = None
         cfg.perception.max_players = 1

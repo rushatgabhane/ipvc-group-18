@@ -134,7 +134,11 @@ class Game:
             return self._other_player(self.forfeited)
         if self.cfg.practice:
             return None
-        return next((p for p, wins in self.scores.items() if wins >= self.cfg.rounds_to_win), None)
+        if sum(self.scores.values()) < self.cfg.match_rounds:
+            return None
+        # With an even number of rounds a tie is possible: keep playing until someone leads.
+        first, second = self.scores.get(1, 0), self.scores.get(2, 0)
+        return None if first == second else (1 if first > second else 2)
 
     def match_summary(self) -> list[tuple[str, str, str]]:
         """One (label, player 1, player 2) row per statistic on the final screen."""

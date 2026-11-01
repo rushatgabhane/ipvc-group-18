@@ -426,15 +426,18 @@ def knock_out(game, winner, loser, t):
     return step(game, duel, int(game.cfg.round_end_s / DT) + 2, t)
 
 
-def test_second_round_win_ends_the_match_and_rematch_clears_it():
+def test_two_straight_wins_still_play_the_third_round_and_rematch_clears_it():
     game, t = start_duel()
     t = knock_out(game, 1, 2, t)
     t = step(game, duel, 2, t)
     assert game.round_live and game.match_winner is None and game.countdown_left(t) == 0
     t = knock_out(game, 1, 2, t)
+    t = step(game, duel, 2, t)
+    assert game.round_live and game.match_winner is None and game.scores == {1: 2}
+    t = knock_out(game, 2, 1, t)
     assert game.mode == "match_over" and game.match_winner == 1
-    assert game.match_summary()[0] == ("ROUNDS WON", "2", "0")
-    assert game.match_summary()[5] == ("DAMAGE DEALT", str(2 * game.cfg.max_hp), "0")
+    assert game.match_summary()[0] == ("ROUNDS WON", "2", "1")
+    assert game.match_summary()[5] == ("DAMAGE DEALT", str(2 * game.cfg.max_hp), str(game.cfg.max_hp))
     t = step(game, duel, 300, t)
     assert game.mode == "match_over" and not game.round_live
     game.new_match()
@@ -453,6 +456,18 @@ def test_one_win_each_goes_to_a_deciding_round():
     knock_out(game, 2, 1, t)
     assert game.mode == "match_over" and game.match_winner == 2
     assert game.match_summary()[0] == ("ROUNDS WON", "1", "2")
+
+
+def test_tie_after_an_even_number_of_rounds_plays_on():
+    game, t = start_duel()
+    game.cfg.match_rounds = 2
+    t = knock_out(game, 1, 2, t)
+    t = step(game, duel, 2, t)
+    t = knock_out(game, 2, 1, t)
+    t = step(game, duel, 2, t)
+    assert game.round_live and game.match_winner is None
+    knock_out(game, 1, 2, t)
+    assert game.mode == "match_over" and game.match_winner == 1
 
 
 def test_self_bomb_in_a_duel_gives_the_opponent_the_round_without_damage_credit():
@@ -475,7 +490,7 @@ def between_rounds_frames(game):
 
 def test_staying_gone_for_two_rounds_forfeits_the_match():
     game, t = start_duel()
-    game.cfg.rounds_to_win = 3
+    game.cfg.match_rounds = 3
     t = step(game, duel, 1, t)
     left_at = t
 
@@ -493,7 +508,7 @@ def test_staying_gone_for_two_rounds_forfeits_the_match():
 
 def test_a_knockout_between_walkouts_means_they_are_not_back_to_back():
     game, t = start_duel()
-    game.cfg.rounds_to_win = 5
+    game.cfg.match_rounds = 5
     t = step(game, duel, 1, t)
 
     def walk_out(t):
