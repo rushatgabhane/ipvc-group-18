@@ -83,6 +83,15 @@ python3.12 -m venv .venv
 Keys: `q`/`esc` quit, `r` restart round, `h` simulate a hit (cuts 25% HP, to test the face damage), `d` debug overlay (skeleton, signal values, timings;
 off by default), `b` toggle background, `f` fullscreen. Sound effects are on; `--mute` turns them off.
 
+## Demo video
+
+[`demo/high_noon_demo.mp4`](demo/high_noon_demo.mp4): a two-player match recorded in one continuous take
+(65 s, 1280x720, 30 fps), webcam inset included. It was recorded with `--record-output` and
+`--demo-timer`. Afterwards the on-screen timer was painted out, 5 frames in which the pose model lost
+both players during a swap (the background showed the raw camera; fixed in the game since) were
+restored, and the game's sound effects were added from the session's event log, since the recorder
+saves pictures only.
+
 ## How to play
 
 Stand about 2.5–3 m from the webcam so your upper body (head to hips) is in frame.
